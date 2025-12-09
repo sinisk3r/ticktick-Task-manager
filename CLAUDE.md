@@ -406,3 +406,11 @@ Custom slash commands are available in `.claude/commands/` to accelerate develop
 - `/api-docs` - Generate API documentation
 
 See `.claude/README.md` for detailed usage and examples.
+
+Remember:
+- We DONT add any keys into git - since its a public project
+- The goal is to have feedback driven execution that works at speed to deliver quick value to users
+
+## Remediation Log (Qwen3 / Ollama)
+- Issue: Qwen3 returned empty `content` while JSON landed in `thinking` when `format:"json"` was used.
+- Fix: Send requests with `think:false` (keep `format:"json"`); fallback to `thinking` only if ever returned.

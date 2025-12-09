@@ -1,0 +1,21 @@
+# Cursor Project Rules
+
+- Be cautious with commands: never run destructive git commands (`reset --hard`, `checkout -- .`, `clean -fd`) without explicit approval.
+- Prefer built-in tools (`read_file`, `rg`, `apply_patch`) over shell `cat`/`grep` for code inspection and edits; batch reads when possible.
+- Use absolute paths in tool calls (root: `/Users/srikar.kandikonda/Desktop/Claude/Task-management`).
+- For small edits, use `apply_patch`; avoid mass search/replace unless confirmed.
+- Keep secrets out of history: never add `.env`, API keys, or tokens to files or commands; do not print environment variables.
+- Backend dev server: `cd backend && ./venv/bin/uvicorn app.main:app --reload --port 8000`.
+- Ollama model: default `qwen3:4b`; for JSON responses send `think:false` with `format:"json"`.
+- Preferred API health check: GET `http://localhost:8000/health`; task analysis: POST `http://localhost:8000/api/analyze`.
+- Before major changes, skim `CLAUDE.md` and `docs/` for context; keep new docs concise and ASCII.
+- Run targeted tests when changing backend logic (`pytest` or endpoint curl checks); fix lint errors introduced.
+
+# Project essentials (from CLAUDE.md)
+- Overview: Context is an LLM-powered task manager on top of TickTick; analyzes tasks into Eisenhower quadrants.
+- Backend: FastAPI (Python 3.11+), async; main app at `backend/app/main.py`.
+- Frontend: Next.js (App Router) at `frontend/`, default dev URL `http://localhost:3000`.
+- Data: PostgreSQL primary store; Redis for cache/queues; ChromaDB for embeddings.
+- LLMs: Currently using Ollama Qwen3 (`think:false` with `format:"json"` for structured responses); Claude API also referenced for analysis flows.
+- Key flows: TickTick webhook → FastAPI → Celery analysis → Postgres → WebSocket → Next.js dashboard (Eisenhower matrix).
+
