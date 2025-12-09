@@ -1,0 +1,18 @@
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# HTTP client for Ollama
+httpx==0.25.2
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Database (for future iterations)
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
