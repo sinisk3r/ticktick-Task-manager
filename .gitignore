@@ -147,6 +147,16 @@ temp/
 coverage/
 .nyc_output/
 
+# Playwright
+.playwright-mcp/
+playwright-report/
+test-results/
+*.png
+*.jpg
+*.jpeg
+*.webm
+*.mp4
+
 # Typescript
 *.tsbuildinfo
 next-env.d.ts

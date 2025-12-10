@@ -29,17 +29,13 @@ export function TaskAnalyzer() {
     setResult(null)
 
     try {
-      // Get LLM settings from localStorage
-      const providerUrl = localStorage.getItem("llm_provider_url") || "http://127.0.0.1:11434"
-
       const response = await fetch("http://localhost:8000/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          task_description: taskDescription,
-          provider_url: providerUrl,
+          description: taskDescription,
         }),
       })
 

@@ -63,17 +63,17 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
-    urgency: int
-    importance: int
-    quadrant: str
+    urgency_score: int
+    importance_score: int
+    eisenhower_quadrant: str
     reasoning: str
 
     class Config:
         json_schema_extra = {
             "example": {
-                "urgency": 8,
-                "importance": 7,
-                "quadrant": "Q1",
+                "urgency_score": 8,
+                "importance_score": 7,
+                "eisenhower_quadrant": "Q1",
                 "reasoning": "High urgency due to Friday deadline, important for quarterly goals"
             }
         }
@@ -155,9 +155,9 @@ async def analyze_task(request: AnalyzeRequest):
     try:
         analysis = await ollama.analyze_task(request.description)
         return AnalyzeResponse(
-            urgency=analysis.urgency,
-            importance=analysis.importance,
-            quadrant=analysis.quadrant,
+            urgency_score=analysis.urgency,
+            importance_score=analysis.importance,
+            eisenhower_quadrant=analysis.quadrant,
             reasoning=analysis.reasoning
         )
     except Exception as e:
