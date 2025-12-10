@@ -17,6 +17,20 @@ from app.services.ticktick import ticktick_service
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
+@router.get("/ticktick/debug")
+async def debug_ticktick_config():
+    """
+    Debug endpoint to check TickTick OAuth configuration.
+    """
+    auth_url = ticktick_service.get_authorization_url(state="ticktick_oauth")
+    return {
+        "client_id": ticktick_service.client_id,
+        "redirect_uri": ticktick_service.redirect_uri,
+        "scope": ticktick_service.SCOPE,
+        "authorization_url": auth_url,
+    }
+
+
 @router.get("/ticktick/authorize")
 async def authorize_ticktick():
     """
@@ -63,14 +77,18 @@ async def callback_ticktick(
     """
     try:
         # Exchange authorization code for tokens
+        print(f"[DEBUG] Exchanging code: {code[:10]}... for tokens")
         token_data = await ticktick_service.exchange_code_for_token(code, db)
+        print(f"[DEBUG] Token exchange successful, got access_token")
 
         # For now, use a default user_id=1 (single-user mode)
         # In multi-user mode, this would come from session/JWT
         user_id = 1
 
         # Store tokens in database
+        print(f"[DEBUG] Storing tokens for user_id={user_id}")
         user = await ticktick_service.store_tokens(db, user_id, token_data)
+        print(f"[DEBUG] Tokens stored successfully")
 
         # Get user info from TickTick to store user_id
         try:
@@ -79,22 +97,27 @@ async def callback_ticktick(
             )
             user.ticktick_user_id = str(user_info.get("userId", ""))
             await db.commit()
+            print(f"[DEBUG] User info fetched, ticktick_user_id={user.ticktick_user_id}")
         except Exception as e:
             # Non-critical - continue even if user info fetch fails
-            print(f"Warning: Could not fetch TickTick user info: {e}")
+            print(f"[WARN] Could not fetch TickTick user info: {e}")
 
         # Redirect to frontend with success message
         frontend_url = "http://localhost:3000"
-        return RedirectResponse(
-            url=f"{frontend_url}/auth/callback?status=success&message=TickTick+connected+successfully"
-        )
+        redirect_url = f"{frontend_url}/auth/callback?status=success&message=TickTick+connected+successfully"
+        print(f"[DEBUG] Redirecting to: {redirect_url}")
+        return RedirectResponse(url=redirect_url)
 
     except Exception as e:
         # Handle errors and redirect to frontend with error message
-        print(f"Error in TickTick OAuth callback: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[ERROR] TickTick OAuth callback failed:\n{error_details}")
+
         frontend_url = "http://localhost:3000"
+        error_msg = str(e).replace(" ", "+")[:100]  # Truncate long errors
         return RedirectResponse(
-            url=f"{frontend_url}/auth/callback?status=error&message=Failed+to+connect+TickTick"
+            url=f"{frontend_url}/auth/callback?status=error&message={error_msg}"
         )
 
 

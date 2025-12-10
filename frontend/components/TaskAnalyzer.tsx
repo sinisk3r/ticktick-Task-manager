@@ -43,7 +43,7 @@ export function TaskAnalyzer() {
     setResult(null)
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/analyze", {
+      const response = await fetch("http://localhost:8000/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -73,7 +73,7 @@ export function TaskAnalyzer() {
     setSyncResult(null)
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/tasks/sync?user_id=1", {
+      const response = await fetch("http://localhost:8000/api/tasks/sync?user_id=1", {
         method: "POST",
       })
 

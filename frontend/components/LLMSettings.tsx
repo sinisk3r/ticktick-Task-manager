@@ -13,7 +13,7 @@ export function LLMSettings() {
   const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [saveMessage, setSaveMessage] = useState<string>("")
-  const [backendUrl] = useState("http://127.0.0.1:8000")
+  const [backendUrl] = useState("http://localhost:8000")
 
   // TickTick state
   const [ticktickConnected, setTicktickConnected] = useState(false)

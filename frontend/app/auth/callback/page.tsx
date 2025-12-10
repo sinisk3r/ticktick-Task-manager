@@ -25,21 +25,30 @@ export default function AuthCallback() {
   const message = searchParams.get("message") || "Processing authentication...";
 
   useEffect(() => {
+    // Only start countdown if we have a status
+    if (!status) return;
+
     // Start countdown timer
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          // Redirect to home page after countdown
-          router.push("/");
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [router]);
+    // Separate timer for redirect to avoid setState during render
+    const redirectTimer = setTimeout(() => {
+      router.push("/");
+    }, 3000);
+
+    return () => {
+      clearInterval(timer);
+      clearTimeout(redirectTimer);
+    };
+  }, [router, status]);
 
   const isSuccess = status === "success";
   const isError = status === "error";

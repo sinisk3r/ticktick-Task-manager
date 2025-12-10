@@ -147,8 +147,10 @@ class TickTickService:
 
         if not user:
             # Create new user if doesn't exist
+            # Use a default email for now (will be updated with real email if available)
             user = User(
                 id=user_id,
+                email=f"user{user_id}@ticktick.local",  # Default email
                 ticktick_access_token=token_data["access_token"],
                 ticktick_refresh_token=token_data.get("refresh_token"),
                 ticktick_user_id=None,  # Will be populated on first sync
