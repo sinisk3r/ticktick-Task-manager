@@ -2,11 +2,12 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TaskAnalyzer } from "@/components/TaskAnalyzer";
+import { TaskList } from "@/components/TaskList";
 import { LLMSettings } from "@/components/LLMSettings";
 
 export default function Home() {
   return (
-    <div className="max-w-4xl mx-auto py-6">
+    <div className="container mx-auto py-6 px-4">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Context Task Management</h1>
         <p className="text-muted-foreground mt-2">
@@ -15,17 +16,26 @@ export default function Home() {
       </div>
 
       <Tabs defaultValue="analyze" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="analyze">Analyze Task</TabsTrigger>
+          <TabsTrigger value="my-tasks">My Tasks</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="analyze" className="mt-6">
-          <TaskAnalyzer />
+          <div className="max-w-4xl mx-auto">
+            <TaskAnalyzer />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="my-tasks" className="mt-6">
+          <TaskList />
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6">
-          <LLMSettings />
+          <div className="max-w-4xl mx-auto">
+            <LLMSettings />
+          </div>
         </TabsContent>
       </Tabs>
     </div>
