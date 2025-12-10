@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.services import OllamaService
-from app.api import tasks, settings, auth
+from app.api import tasks, settings, auth, profile
 
 # Load environment variables
 load_dotenv()
@@ -68,6 +68,7 @@ app.add_middleware(
 app.include_router(tasks.router)
 app.include_router(settings.router)
 app.include_router(auth.router)
+app.include_router(profile.router)
 
 
 # Request/Response models

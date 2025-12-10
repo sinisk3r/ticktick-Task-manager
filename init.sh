@@ -136,6 +136,21 @@ kill_port_owner() {
   if [[ -n "$pid" ]]; then
     echo "[init] Port $port is occupied by process $pid"
 
+    # If the process looks like one of ours (uvicorn/next under ROOT_DIR), kill without prompting
+    local cmdline
+    cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$cmdline" == *"$ROOT_DIR/backend/venv/bin/uvicorn"* ]] || [[ "$cmdline" == *"app.main:app"* ]] || [[ "$cmdline" == *"$ROOT_DIR/frontend"* && "$cmdline" == *"next"* ]]; then
+      echo "[init] Detected owned process for $name (cmd: $cmdline); killing without prompt to avoid duplicates..."
+      kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+      sleep 2
+      if check_port "$port"; then
+        echo "[init] ERROR: Failed to free port $port"
+        return 1
+      fi
+      echo "[init] Port $port freed successfully"
+      return 0
+    fi
+
     # In force mode or non-interactive mode, automatically kill
     if [[ "$FORCE_MODE" == "true" ]] || [[ ! -t 0 ]]; then
       echo "[init] Automatically killing process $pid (force mode or non-interactive)..."
@@ -149,23 +164,9 @@ kill_port_owner() {
       return 0
     fi
 
-    # Interactive mode - ask user
-    read -p "[init] Kill process $pid to free port for $name? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-      echo "[init] Killing process $pid..."
-      kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-      sleep 2
-      if check_port "$port"; then
-        echo "[init] ERROR: Failed to free port $port"
-        return 1
-      fi
-      echo "[init] Port $port freed successfully"
-      return 0
-    else
-      echo "[init] Aborting $name start - port $port unavailable"
-      return 1
-    fi
+    # Interactive mode - avoid killing unknown processes; fail fast
+    echo "[init] Aborting $name start - port $port is used by an external process (pid $pid, cmd: $cmdline). Use FORCE_MODE=true if you want auto-kill."
+    return 1
   fi
   return 0
 }
@@ -238,18 +239,8 @@ start_docker() {
     else
       local postgres_owner
       postgres_owner=$(get_port_owner "$postgres_port")
-      echo "[init] WARNING: Port $postgres_port (PostgreSQL) is already in use by process $postgres_owner"
-      echo "[init] Docker may fail to start PostgreSQL. Consider stopping the conflicting process."
-
-      if [[ "$FORCE_MODE" == "true" ]] || [[ ! -t 0 ]]; then
-        echo "[init] Continuing in force/non-interactive mode..."
-      else
-        read -p "[init] Continue anyway? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-          exit 1
-        fi
-      fi
+      echo "[init] WARNING: Port $postgres_port (PostgreSQL) is already in use by process $postgres_owner (not the project container)"
+      echo "[init] Docker may fail to start PostgreSQL; continuing without prompts."
     fi
   fi
 
@@ -306,9 +297,17 @@ start_backend() {
   local backend_port
   backend_port=$(get_configured_port "backend")
 
-  if [[ -f "$BACKEND_PID" ]] && is_running "$(cat "$BACKEND_PID")"; then
-    echo "[init] Backend already running (pid $(cat "$BACKEND_PID")) on port $backend_port."
-    return
+  # If backend is already running, stop it first to avoid duplicates
+  if [[ -f "$BACKEND_PID" ]]; then
+    local existing_backend_pid
+    existing_backend_pid=$(cat "$BACKEND_PID")
+    if is_running "$existing_backend_pid"; then
+      echo "[init] Backend already running (pid $existing_backend_pid) - stopping to avoid duplicates"
+      stop_service "backend" "$BACKEND_PID"
+    else
+      echo "[init] Backend pid file exists but process not running (cleaning stale pid file)."
+      rm -f "$BACKEND_PID"
+    fi
   fi
 
   # Check if configured port is already in use
@@ -372,9 +371,17 @@ start_frontend() {
   local frontend_port
   frontend_port=$(get_configured_port "frontend")
 
-  if [[ -f "$FRONTEND_PID" ]] && is_running "$(cat "$FRONTEND_PID")"; then
-    echo "[init] Frontend already running (pid $(cat "$FRONTEND_PID")) on port $frontend_port."
-    return
+  # If frontend is already running, stop it first to avoid duplicates
+  if [[ -f "$FRONTEND_PID" ]]; then
+    local existing_frontend_pid
+    existing_frontend_pid=$(cat "$FRONTEND_PID")
+    if is_running "$existing_frontend_pid"; then
+      echo "[init] Frontend already running (pid $existing_frontend_pid) - stopping to avoid duplicates"
+      stop_service "frontend" "$FRONTEND_PID"
+    else
+      echo "[init] Frontend pid file exists but process not running (cleaning stale pid file)."
+      rm -f "$FRONTEND_PID"
+    fi
   fi
 
   # Check if configured port is already in use

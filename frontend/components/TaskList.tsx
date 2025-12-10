@@ -18,7 +18,11 @@ interface Task {
   urgency_score: number
   importance_score: number
   eisenhower_quadrant: string
+  effective_quadrant?: string
   analysis_reasoning?: string
+  manual_quadrant_override?: string
+  manual_override_reason?: string
+  manual_override_at?: string
   status: string
   created_at: string
   ticktick_task_id?: string
@@ -36,13 +40,16 @@ export function TaskList() {
   const [selectedQuadrant, setSelectedQuadrant] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
+  const getQuadrant = (task: Task) =>
+    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
+
   // Calculate task counts by quadrant
   const taskCounts = {
     all: tasks.length,
-    Q1: tasks.filter((t) => t.eisenhower_quadrant === "Q1").length,
-    Q2: tasks.filter((t) => t.eisenhower_quadrant === "Q2").length,
-    Q3: tasks.filter((t) => t.eisenhower_quadrant === "Q3").length,
-    Q4: tasks.filter((t) => t.eisenhower_quadrant === "Q4").length,
+    Q1: tasks.filter((t) => getQuadrant(t) === "Q1").length,
+    Q2: tasks.filter((t) => getQuadrant(t) === "Q2").length,
+    Q3: tasks.filter((t) => getQuadrant(t) === "Q3").length,
+    Q4: tasks.filter((t) => getQuadrant(t) === "Q4").length,
   }
 
   const fetchTasks = async () => {
@@ -85,7 +92,7 @@ export function TaskList() {
 
   // Filter tasks based on selected quadrant
   const filteredTasks = selectedQuadrant
-    ? tasks.filter((task) => task.eisenhower_quadrant === selectedQuadrant)
+    ? tasks.filter((task) => getQuadrant(task) === selectedQuadrant)
     : tasks
 
   if (loading) {
@@ -177,7 +184,7 @@ export function TaskList() {
 
       {/* Matrix View */}
       <TabsContent value="matrix" className="mt-6">
-        <EisenhowerMatrix />
+        <EisenhowerMatrix tasks={tasks} onTasksUpdate={setTasks} refresh={handleRefresh} />
       </TabsContent>
 
       {/* List View */}

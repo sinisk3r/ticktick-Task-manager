@@ -14,6 +14,10 @@ interface Task {
   urgency_score: number
   importance_score: number
   eisenhower_quadrant: string
+  effective_quadrant?: string
+  manual_quadrant_override?: string
+  manual_override_reason?: string
+  manual_override_at?: string
   analysis_reasoning?: string
   status: string
   created_at: string
@@ -60,7 +64,10 @@ const getQuadrantConfig = (quadrant: string) => {
 
 export function TaskCard({ task }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false)
-  const quadrantConfig = getQuadrantConfig(task.eisenhower_quadrant)
+  const effectiveQuadrant =
+    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
+  const quadrantConfig = getQuadrantConfig(effectiveQuadrant)
+  const manualOverride = Boolean(task.manual_quadrant_override)
 
   // Truncate description to 100 characters
   const truncatedDescription = task.description
@@ -85,6 +92,11 @@ export function TaskCard({ task }: TaskCardProps) {
         <Badge variant={quadrantConfig.badgeVariant} className="text-sm">
           {quadrantConfig.icon} {quadrantConfig.label}
         </Badge>
+        {manualOverride && (
+          <Badge variant="outline" className="ml-2 text-xs">
+            Manual override
+          </Badge>
+        )}
       </div>
 
       {/* Task Title */}
@@ -156,6 +168,13 @@ export function TaskCard({ task }: TaskCardProps) {
         <span className="text-xs text-gray-500">
           {new Date(task.created_at).toLocaleDateString()}
         </span>
+        {manualOverride && (
+          <span className="text-[10px] text-gray-400">
+            {task.manual_override_at
+              ? `Updated ${new Date(task.manual_override_at).toLocaleDateString()}`
+              : "Manual"}
+          </span>
+        )}
         {task.ticktick_task_id && (
           <Badge variant="outline" className="text-xs">
             TickTick

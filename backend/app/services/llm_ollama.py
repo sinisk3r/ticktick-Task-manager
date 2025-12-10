@@ -51,7 +51,7 @@ class OllamaService:
         except Exception:
             return []
 
-    async def analyze_task(self, description: str) -> TaskAnalysis:
+    async def analyze_task(self, description: str, profile_context: str | None = None) -> TaskAnalysis:
         """
         Analyze a task description and return urgency/importance scores.
 
@@ -65,14 +65,17 @@ class OllamaService:
             "You are a task analysis assistant. "
             "Respond ONLY with JSON containing integer fields "
             "urgency (1-10) and importance (1-10), plus a brief reasoning string "
-            "under 200 characters."
+            "under 200 characters. Consider provided user context if present."
         )
 
-        user_message = f"""Analyze this task:
+        context_block = f"User context: {profile_context}\n\n" if profile_context else ""
+        user_message = (
+            f"""{context_block}Analyze this task:
 {description}
 
 Return strictly valid JSON in this shape:
 {{"urgency": <int 1-10>, "importance": <int 1-10>, "reasoning": "<brief explanation>"}}"""
+        )
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             payload = {

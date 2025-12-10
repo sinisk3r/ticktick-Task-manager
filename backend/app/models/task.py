@@ -57,6 +57,10 @@ class Task(Base):
     # Manual Overrides (user can override LLM)
     manual_priority_override = Column(Integer, nullable=True)  # 1-4 (quadrant override)
     manual_quadrant_override = Column(SQLEnum(EisenhowerQuadrant), nullable=True)
+    manual_override_reason = Column(Text, nullable=True)
+    manual_override_source = Column(String(255), nullable=True)  # who/what set the override
+    manual_override_at = Column(DateTime(timezone=True), nullable=True)
+    manual_order = Column(Integer, nullable=True, index=True)  # per-quadrant manual ordering
 
     # Calendar Integration (future iteration)
     calendar_event_id = Column(String(255), nullable=True)

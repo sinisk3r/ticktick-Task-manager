@@ -32,6 +32,7 @@ class User(Base):
     # Relationships
     tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan")
     settings = relationship("Settings", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}')>"

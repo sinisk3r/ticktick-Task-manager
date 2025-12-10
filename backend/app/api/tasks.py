@@ -5,14 +5,16 @@ from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, or_, and_
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.models.task import Task, TaskStatus, EisenhowerQuadrant
 from app.models.user import User
+from app.models.profile import Profile
 from app.services import OllamaService
 from app.services.ticktick import ticktick_service
+from app.services.prompt_utils import build_profile_context
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -54,6 +56,29 @@ class TaskUpdate(BaseModel):
         }
 
 
+class QuadrantUpdate(BaseModel):
+    """Request schema for manual quadrant overrides."""
+
+    manual_quadrant: Optional[EisenhowerQuadrant] = Field(
+        None, description="Manual quadrant override (use reset_to_ai to clear)"
+    )
+    reason: Optional[str] = Field(None, max_length=500, description="Reason for override")
+    source: Optional[str] = Field(None, max_length=255, description="Who/what set the override")
+    reset_to_ai: bool = Field(False, description="Clear manual override and revert to AI suggestion")
+    reanalyze: bool = Field(False, description="Re-run LLM analysis when resetting to AI")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "manual_quadrant": "Q2",
+                "reason": "Moved in matrix view",
+                "source": "user",
+                "reset_to_ai": False,
+                "reanalyze": False,
+            }
+        }
+
+
 class TaskResponse(BaseModel):
     """Response schema for task data."""
     id: int
@@ -66,8 +91,13 @@ class TaskResponse(BaseModel):
     importance_score: Optional[float]
     effort_hours: Optional[float]
     eisenhower_quadrant: Optional[EisenhowerQuadrant]
+    effective_quadrant: Optional[EisenhowerQuadrant]
     analysis_reasoning: Optional[str]
     manual_quadrant_override: Optional[EisenhowerQuadrant]
+    manual_override_reason: Optional[str]
+    manual_override_source: Optional[str]
+    manual_override_at: Optional[datetime]
+    manual_order: Optional[int]
     created_at: datetime
     updated_at: datetime
     analyzed_at: Optional[datetime]
@@ -86,8 +116,13 @@ class TaskResponse(BaseModel):
                 "importance_score": 7.0,
                 "effort_hours": None,
                 "eisenhower_quadrant": "Q1",
+                "effective_quadrant": "Q1",
                 "analysis_reasoning": "High urgency due to deadline, important for business goals",
+                "manual_override_reason": None,
+                "manual_override_source": None,
+                "manual_override_at": None,
                 "manual_quadrant_override": None,
+                "manual_order": 1,
                 "created_at": "2025-12-10T10:00:00Z",
                 "updated_at": "2025-12-10T10:00:00Z",
                 "analyzed_at": "2025-12-10T10:00:05Z"
@@ -99,6 +134,24 @@ class TaskListResponse(BaseModel):
     """Response schema for list of tasks."""
     tasks: List[TaskResponse]
     total: int
+
+
+async def _get_profile_context(user_id: int, db: AsyncSession) -> Optional[str]:
+    """Return a compact, bulletized profile string for the given user."""
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+    return build_profile_context(profile)
+
+
+def _effective_quadrant_expression(target: EisenhowerQuadrant):
+    """SQL expression matching effective quadrant (manual override wins)."""
+    return or_(
+        Task.manual_quadrant_override == target,
+        and_(
+            Task.manual_quadrant_override.is_(None),
+            Task.eisenhower_quadrant == target
+        )
+    )
 
 
 @router.post("", response_model=TaskResponse, status_code=201)
@@ -131,7 +184,8 @@ async def create_task(
 
             # Check if Ollama is available
             if await ollama.health_check():
-                analysis = await ollama.analyze_task(task_data.description)
+                profile_context = await _get_profile_context(task_data.user_id, db)
+                analysis = await ollama.analyze_task(task_data.description, profile_context=profile_context)
 
                 # Update task with analysis results
                 new_task.urgency_score = float(analysis.urgency)
@@ -182,12 +236,14 @@ async def list_tasks(
     if quadrant:
         # Check both LLM quadrant and manual override
         query = query.where(
-            (Task.eisenhower_quadrant == quadrant) |
-            (Task.manual_quadrant_override == quadrant)
+            _effective_quadrant_expression(quadrant)
         )
 
     # Order by created_at descending (newest first)
-    query = query.order_by(Task.created_at.desc())
+    query = query.order_by(
+        Task.manual_order.asc().nullslast(),
+        Task.created_at.desc()
+    )
 
     # Count total before pagination
     count_query = select(Task.id).where(Task.user_id == user_id)
@@ -195,8 +251,7 @@ async def list_tasks(
         count_query = count_query.where(Task.status == status)
     if quadrant:
         count_query = count_query.where(
-            (Task.eisenhower_quadrant == quadrant) |
-            (Task.manual_quadrant_override == quadrant)
+            _effective_quadrant_expression(quadrant)
         )
 
     result_count = await db.execute(count_query)
@@ -210,6 +265,50 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return TaskListResponse(tasks=tasks, total=total)
+
+
+class ReorderRequest(BaseModel):
+    """Payload for reordering tasks within a quadrant."""
+
+    user_id: int = Field(..., gt=0)
+    quadrant: EisenhowerQuadrant
+    task_ids: List[int] = Field(..., min_length=1, description="Ordered task IDs for this quadrant")
+
+
+@router.post("/reorder", response_model=TaskListResponse)
+async def reorder_tasks(
+    payload: ReorderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reorder tasks within a quadrant. Manual order is stored server-side.
+    - task_ids should represent the exact desired order for that quadrant.
+    - Only tasks matching the effective quadrant are updated.
+    """
+    # Fetch tasks to ensure they belong to user and quadrant
+    tasks_query = select(Task).where(
+        Task.user_id == payload.user_id,
+        Task.id.in_(payload.task_ids),
+        _effective_quadrant_expression(payload.quadrant),
+    )
+    result = await db.execute(tasks_query)
+    tasks = result.scalars().all()
+
+    if len(tasks) != len(payload.task_ids):
+        raise HTTPException(status_code=400, detail="Some tasks not found in that quadrant for this user")
+
+    order_map = {task_id: index + 1 for index, task_id in enumerate(payload.task_ids)}
+
+    for task in tasks:
+        task.manual_order = order_map.get(task.id, task.manual_order)
+        task.updated_at = datetime.utcnow()
+
+    await db.flush()
+    await db.commit()
+
+    # Return the ordered tasks for the quadrant
+    ordered_tasks = sorted(tasks, key=lambda t: order_map.get(t.id, 0))
+    return TaskListResponse(tasks=ordered_tasks, total=len(ordered_tasks))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -264,6 +363,80 @@ async def update_task(
     task.updated_at = datetime.utcnow()
 
     await db.flush()
+    await db.refresh(task)
+
+    return task
+
+
+@router.patch("/{task_id}/quadrant", response_model=TaskResponse)
+async def update_task_quadrant(
+    task_id: int,
+    quadrant_update: QuadrantUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Set or clear a manual quadrant override.
+
+    - Provide `manual_quadrant` to override the LLM suggestion.
+    - Provide `reset_to_ai=true` to clear the override. Optionally set `reanalyze=true`
+      to refresh AI analysis using the current description.
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    if quadrant_update.reset_to_ai:
+        task.manual_quadrant_override = None
+        task.manual_override_reason = None
+        task.manual_override_source = None
+        task.manual_override_at = None
+
+        if quadrant_update.reanalyze and task.description:
+            ollama = OllamaService()
+            if await ollama.health_check():
+                profile_context = await _get_profile_context(task.user_id, db)
+                try:
+                    analysis = await ollama.analyze_task(
+                        task.description,
+                        profile_context=profile_context,
+                    )
+                    task.urgency_score = float(analysis.urgency)
+                    task.importance_score = float(analysis.importance)
+                    task.eisenhower_quadrant = EisenhowerQuadrant(analysis.quadrant)
+                    task.analysis_reasoning = analysis.reasoning
+                    task.analyzed_at = datetime.utcnow()
+                except Exception as e:
+                    print(f"[ERROR] Re-analysis failed for task {task_id}: {str(e)}")
+    else:
+        if not quadrant_update.manual_quadrant:
+            raise HTTPException(
+                status_code=400,
+                detail="manual_quadrant is required when reset_to_ai is false"
+            )
+        task.manual_quadrant_override = quadrant_update.manual_quadrant
+        task.manual_override_reason = quadrant_update.reason or "Manual override"
+        task.manual_override_source = quadrant_update.source or "user"
+        task.manual_override_at = datetime.utcnow()
+
+        # First flush the quadrant change
+        await db.flush()
+
+        # Now calculate max_order for the NEW quadrant (excluding this task)
+        max_order_query = select(func.max(Task.manual_order)).where(
+            Task.user_id == task.user_id,
+            Task.id != task.id,  # Exclude current task
+            _effective_quadrant_expression(quadrant_update.manual_quadrant),
+        )
+        max_order_result = await db.execute(max_order_query)
+        max_order = max_order_result.scalar()
+        task.manual_order = (max_order or 0) + 1
+
+    task.updated_at = datetime.utcnow()
+
+    await db.flush()
+    await db.commit()
     await db.refresh(task)
 
     return task
@@ -366,6 +539,7 @@ async def sync_ticktick_tasks(
         # Initialize LLM service
         ollama = OllamaService()
         ollama_available = await ollama.health_check()
+        profile_context = await _get_profile_context(user_id, db)
 
         # Process each task
         for tt_task in ticktick_tasks:
@@ -391,7 +565,10 @@ async def sync_ticktick_tasks(
                 analysis_result = None
                 if ollama_available and task_description.strip():
                     try:
-                        analysis_result = await ollama.analyze_task(task_description)
+                        analysis_result = await ollama.analyze_task(
+                            task_description,
+                            profile_context=profile_context
+                        )
                         analyzed_count += 1
                     except Exception as e:
                         print(f"[ERROR] Analysis failed for task {task_id}: {str(e)}")
