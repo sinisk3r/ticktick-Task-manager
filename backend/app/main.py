@@ -12,14 +12,21 @@ from app.api import tasks, settings, auth
 # Load environment variables
 load_dotenv()
 
+# Also load runtime config if available (created by init.sh)
+runtime_env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", ".env.runtime")
+if os.path.exists(runtime_env_path):
+    load_dotenv(runtime_env_path, override=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler"""
     # Startup
-    print(f"Starting Context API...")
+    backend_port = os.getenv('BACKEND_PORT', '8000')
+    print(f"Starting Context API on port {backend_port}...")
     print(f"Ollama URL: {os.getenv('OLLAMA_URL', 'http://localhost:11434')}")
     print(f"Ollama Model: {os.getenv('OLLAMA_MODEL', 'qwen3:4b')}")
+    print(f"Frontend URL: {os.getenv('FRONTEND_URL', 'http://localhost:3000')}")
     yield
     # Shutdown
     print("Shutting down Context API...")
@@ -32,16 +39,26 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration - dynamically allow configured ports
+frontend_port = os.getenv("FRONTEND_PORT", "3000")
+backend_port = os.getenv("BACKEND_PORT", "8000")
+
+allowed_origins = [
+    os.getenv("FRONTEND_URL", f"http://localhost:{frontend_port}"),
+    f"http://localhost:{frontend_port}",
+    f"http://127.0.0.1:{frontend_port}",
+    f"http://localhost:{backend_port}",
+    f"http://127.0.0.1:{backend_port}",
+    # Also allow default ports for development
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:3000"),
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

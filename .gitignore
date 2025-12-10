@@ -99,11 +99,16 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 .env*.local
+.env.runtime
 
 # Environment variables
 backend/.env
 frontend/.env.local
 *.env
+
+# Runtime configuration (managed by init.sh)
+.ports.json
+.pids/
 
 # Sensitive files
 client_secret.json
