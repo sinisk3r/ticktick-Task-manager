@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Key points to follow when working
+- Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
+
 ## Project Overview
 
 **Context** is an LLM-powered task management system that sits on top of TickTick to auto-prioritize, schedule, and protect wellbeing. It acts as an intelligent middleware layer between TickTick and the user, powered by Claude API for contextual understanding.
@@ -88,6 +91,16 @@ npm run dev
 ```
 
 Frontend runs on `http://localhost:3000`, backend on `http://localhost:8000`
+
+### Service orchestration (init.sh)
+
+From repo root:
+```bash
+./init.sh <start|stop|restart> [all|docker|backend|frontend]
+```
+- Default target is `all`.
+- Requires Docker Desktop running; backend venv at `backend/venv`.
+- Logs: `backend/uvicorn.log`, `frontend/next-dev.log`; PID files in `.pids/`.
 
 ### Testing
 

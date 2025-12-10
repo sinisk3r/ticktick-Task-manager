@@ -9,8 +9,8 @@
 ## Pre-Development (Week 0)
 
 ### Setup Checklist
-- [ ] Create GitHub repository
-- [ ] Register TickTick OAuth app at developer.ticktick.com
+- [y] Create GitHub repository
+- [y] Register TickTick OAuth app at developer.ticktick.com
 - [ ] Get Claude API key from Anthropic
 - [ ] Set up PostgreSQL database (Railway)
 - [ ] Set up Redis instance (Railway)

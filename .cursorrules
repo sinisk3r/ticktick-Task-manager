@@ -6,6 +6,7 @@
 - For small edits, use `apply_patch`; avoid mass search/replace unless confirmed.
 - Keep secrets out of history: never add `.env`, API keys, or tokens to files or commands; do not print environment variables.
 - Backend dev server: `cd backend && ./venv/bin/uvicorn app.main:app --reload --port 8000`.
+- Service orchestration: from repo root run `./init.sh <start|stop|restart> [all|docker|backend|frontend]` (default target `all`). Requires Docker Desktop running; backend venv at `backend/venv`. Logs: `backend/uvicorn.log`, `frontend/next-dev.log`; PID files in `.pids/`.
 - Ollama model: default `qwen3:4b`; for JSON responses send `think:false` with `format:"json"`.
 - Preferred API health check: GET `http://localhost:8000/health`; task analysis: POST `http://localhost:8000/api/analyze`.
 - Before major changes, skim `CLAUDE.md` and `docs/` for context; keep new docs concise and ASCII.
