@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.models.task import Task, TaskStatus, EisenhowerQuadrant
+from app.models.user import User
 from app.services import OllamaService
+from app.services.ticktick import ticktick_service
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -300,3 +302,162 @@ async def delete_task(
         await db.delete(task)
 
     return None
+
+
+class SyncResponse(BaseModel):
+    """Response schema for sync operation."""
+    synced_count: int
+    analyzed_count: int
+    failed_count: int
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "synced_count": 15,
+                "analyzed_count": 15,
+                "failed_count": 0,
+                "message": "Successfully synced 15 tasks from TickTick"
+            }
+        }
+
+
+@router.post("/sync", response_model=SyncResponse)
+async def sync_ticktick_tasks(
+    user_id: int = Query(1, description="User ID to sync tasks for"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Sync tasks from TickTick for a user.
+
+    This endpoint:
+    1. Fetches user's TickTick access token from database
+    2. Calls TickTick API to get all tasks
+    3. For each task, performs LLM analysis
+    4. Saves tasks to database with analysis results
+
+    Returns count of synced tasks and analysis results.
+
+    Raises:
+        HTTPException: If user not found or TickTick not connected
+    """
+    # Get user from database
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.ticktick_access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="TickTick not connected. Please connect your TickTick account first."
+        )
+
+    # Initialize counters
+    synced_count = 0
+    analyzed_count = 0
+    failed_count = 0
+
+    try:
+        # Fetch tasks from TickTick
+        ticktick_tasks = await ticktick_service.get_tasks(user.ticktick_access_token)
+
+        # Initialize LLM service
+        ollama = OllamaService()
+        ollama_available = await ollama.health_check()
+
+        # Process each task
+        for tt_task in ticktick_tasks:
+            try:
+                # Skip completed tasks (status=2 in TickTick)
+                if tt_task.get("status") == 2:
+                    continue
+
+                # Check if task already exists in database
+                task_id = tt_task.get("id")
+                existing_task_result = await db.execute(
+                    select(Task).where(
+                        Task.ticktick_task_id == task_id,
+                        Task.user_id == user_id
+                    )
+                )
+                existing_task = existing_task_result.scalar_one_or_none()
+
+                # Prepare task description for analysis
+                task_description = tt_task.get("content") or tt_task.get("title", "")
+
+                # Perform LLM analysis if Ollama is available and task has description
+                analysis_result = None
+                if ollama_available and task_description.strip():
+                    try:
+                        analysis_result = await ollama.analyze_task(task_description)
+                        analyzed_count += 1
+                    except Exception as e:
+                        print(f"[ERROR] Analysis failed for task {task_id}: {str(e)}")
+
+                if existing_task:
+                    # Update existing task
+                    existing_task.title = tt_task.get("title", existing_task.title)
+                    existing_task.description = tt_task.get("content")
+                    existing_task.ticktick_project_id = tt_task.get("project_id")
+
+                    # Update analysis if available
+                    if analysis_result:
+                        existing_task.urgency_score = float(analysis_result.urgency)
+                        existing_task.importance_score = float(analysis_result.importance)
+                        existing_task.eisenhower_quadrant = EisenhowerQuadrant(analysis_result.quadrant)
+                        existing_task.analysis_reasoning = analysis_result.reasoning
+                        existing_task.analyzed_at = datetime.utcnow()
+
+                    existing_task.updated_at = datetime.utcnow()
+
+                else:
+                    # Create new task
+                    new_task = Task(
+                        user_id=user_id,
+                        title=tt_task.get("title", "Untitled Task"),
+                        description=tt_task.get("content"),
+                        ticktick_task_id=task_id,
+                        ticktick_project_id=tt_task.get("project_id"),
+                        status=TaskStatus.ACTIVE,
+                    )
+
+                    # Add analysis results if available
+                    if analysis_result:
+                        new_task.urgency_score = float(analysis_result.urgency)
+                        new_task.importance_score = float(analysis_result.importance)
+                        new_task.eisenhower_quadrant = EisenhowerQuadrant(analysis_result.quadrant)
+                        new_task.analysis_reasoning = analysis_result.reasoning
+                        new_task.analyzed_at = datetime.utcnow()
+
+                    db.add(new_task)
+
+                synced_count += 1
+
+            except Exception as e:
+                print(f"[ERROR] Failed to sync task {tt_task.get('id', 'unknown')}: {str(e)}")
+                failed_count += 1
+                continue
+
+        # Commit all changes
+        await db.commit()
+
+        # Prepare response message
+        if not ollama_available:
+            message = f"Synced {synced_count} tasks from TickTick (LLM analysis unavailable)"
+        else:
+            message = f"Successfully synced {synced_count} tasks from TickTick ({analyzed_count} analyzed)"
+
+        return SyncResponse(
+            synced_count=synced_count,
+            analyzed_count=analyzed_count,
+            failed_count=failed_count,
+            message=message
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync TickTick tasks: {str(e)}"
+        )

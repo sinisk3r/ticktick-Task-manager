@@ -4,6 +4,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { RefreshCw, CheckCircle2 } from "lucide-react"
 
 interface AnalysisResult {
   urgency_score: number
@@ -12,11 +14,23 @@ interface AnalysisResult {
   reasoning: string
 }
 
+interface SyncResult {
+  synced_count: number
+  analyzed_count: number
+  failed_count: number
+  message: string
+}
+
 export function TaskAnalyzer() {
   const [taskDescription, setTaskDescription] = useState("")
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Sync state
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   const analyzeTask = async () => {
     if (!taskDescription.trim()) {
@@ -29,7 +43,7 @@ export function TaskAnalyzer() {
     setResult(null)
 
     try {
-      const response = await fetch("http://localhost:8000/api/analyze", {
+      const response = await fetch("http://127.0.0.1:8000/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -50,6 +64,34 @@ export function TaskAnalyzer() {
       setError(err instanceof Error ? err.message : "Failed to analyze task. Make sure the backend is running.")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const syncTicktickTasks = async () => {
+    setSyncing(true)
+    setSyncError(null)
+    setSyncResult(null)
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/tasks/sync?user_id=1", {
+        method: "POST",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      setSyncResult(data)
+    } catch (err) {
+      setSyncError(
+        err instanceof Error
+          ? err.message
+          : "Failed to sync TickTick tasks. Make sure you're connected."
+      )
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -85,6 +127,54 @@ export function TaskAnalyzer() {
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Sync TickTick Tasks</CardTitle>
+          <CardDescription>
+            Sync and analyze your tasks from TickTick
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button
+            onClick={syncTicktickTasks}
+            disabled={syncing}
+            className="w-full flex items-center justify-center gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing Tasks..." : "Sync TickTick Tasks"}
+          </Button>
+
+          {syncResult && (
+            <Alert className="border-green-700 bg-green-900/50">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <AlertDescription className="text-sm">
+                <p className="font-medium">{syncResult.message}</p>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Synced:</span>{" "}
+                    <span className="font-bold">{syncResult.synced_count}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Analyzed:</span>{" "}
+                    <span className="font-bold">{syncResult.analyzed_count}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Failed:</span>{" "}
+                    <span className="font-bold">{syncResult.failed_count}</span>
+                  </div>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {syncError && (
+            <Alert variant="destructive">
+              <AlertDescription className="text-sm">{syncError}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Analyze Task</CardTitle>

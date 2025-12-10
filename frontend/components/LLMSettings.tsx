@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle2, XCircle, Loader2, Info } from "lucide-react"
+import { CheckCircle2, XCircle, Loader2, Info, Link as LinkIcon, Unlink } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function LLMSettings() {
@@ -15,6 +15,11 @@ export function LLMSettings() {
   const [saveMessage, setSaveMessage] = useState<string>("")
   const [backendUrl] = useState("http://127.0.0.1:8000")
 
+  // TickTick state
+  const [ticktickConnected, setTicktickConnected] = useState(false)
+  const [ticktickUserId, setTicktickUserId] = useState<string | null>(null)
+  const [ticktickStatus, setTicktickStatus] = useState<"checking" | "ready">("ready")
+
   // Load settings and fetch available models on mount
   useEffect(() => {
     const savedModel = localStorage.getItem("llm_model")
@@ -22,7 +27,48 @@ export function LLMSettings() {
 
     // Fetch available models and test connection
     fetchModels()
+
+    // Check TickTick connection status
+    checkTicktickStatus()
   }, [])
+
+  const checkTicktickStatus = async () => {
+    setTicktickStatus("checking")
+    try {
+      const response = await fetch(`${backendUrl}/auth/ticktick/status`)
+      if (response.ok) {
+        const data = await response.json()
+        setTicktickConnected(data.connected)
+        setTicktickUserId(data.ticktick_user_id)
+      }
+    } catch (err) {
+      console.error("Failed to check TickTick status:", err)
+    } finally {
+      setTicktickStatus("ready")
+    }
+  }
+
+  const connectTicktick = () => {
+    // Redirect to backend OAuth URL
+    window.location.href = `${backendUrl}/auth/ticktick/authorize`
+  }
+
+  const disconnectTicktick = async () => {
+    try {
+      const response = await fetch(`${backendUrl}/auth/ticktick/disconnect`, {
+        method: "POST",
+      })
+
+      if (response.ok) {
+        setTicktickConnected(false)
+        setTicktickUserId(null)
+        setSaveMessage("TickTick disconnected successfully")
+        setTimeout(() => setSaveMessage(""), 3000)
+      }
+    } catch (err) {
+      console.error("Failed to disconnect TickTick:", err)
+    }
+  }
 
   const fetchModels = async () => {
     try {
@@ -181,6 +227,69 @@ export function LLMSettings() {
               </div>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>TickTick Integration</CardTitle>
+          <CardDescription>
+            Connect your TickTick account to sync and analyze your tasks
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-900/50 rounded-md border border-gray-700">
+            <div className="flex items-center gap-3">
+              {ticktickStatus === "checking" ? (
+                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              ) : ticktickConnected ? (
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-gray-500" />
+              )}
+              <div>
+                <p className="text-sm font-medium">
+                  {ticktickConnected ? "Connected to TickTick" : "Not Connected"}
+                </p>
+                {ticktickUserId && (
+                  <p className="text-xs text-muted-foreground">
+                    User ID: {ticktickUserId}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {ticktickConnected ? (
+                <Button
+                  onClick={disconnectTicktick}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Unlink className="h-4 w-4" />
+                  Disconnect
+                </Button>
+              ) : (
+                <Button
+                  onClick={connectTicktick}
+                  size="sm"
+                  className="flex items-center gap-2"
+                  disabled={ticktickStatus === "checking"}
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  Connect TickTick
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <Alert className="border-blue-700 bg-blue-900/20">
+            <Info className="h-4 w-4 text-blue-400" />
+            <AlertDescription className="text-sm text-muted-foreground">
+              After connecting, you can sync your TickTick tasks from the Analyze tab.
+              All tasks will be automatically analyzed by AI.
+            </AlertDescription>
+          </Alert>
         </CardContent>
       </Card>
 
