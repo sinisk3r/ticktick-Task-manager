@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, ReactNode } from "react"
+import { useState, useCallback, ReactNode, useEffect } from "react"
 import useSWR, { mutate } from 'swr'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -12,15 +12,16 @@ import { DatePicker } from "@/components/DatePicker"
 import { MetadataRow } from "@/components/MetadataRow"
 import { MarkdownEditor } from "@/components/MarkdownEditor"
 import { SuggestionPanel } from "@/components/SuggestionPanel"
-import { api, API_BASE } from "@/lib/api"
+import { api } from "@/lib/api"
 import { X, Trash2, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Task, SuggestionsResponse } from "@/types/task"
+import { Task, SuggestionsResponse, Suggestion } from "@/types/task"
 import { ProjectSelector } from "@/components/metadata/ProjectSelector"
 import { TagsInput } from "@/components/metadata/TagsInput"
 import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
 import { TimeEstimateInput } from "@/components/metadata/TimeEstimateInput"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 interface TaskDetailPopoverProps {
@@ -66,10 +67,19 @@ export function TaskDetailPopover({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [streamingSuggestions, setStreamingSuggestions] = useState<Suggestion[]>([])
 
   // Use controlled state if provided, otherwise use internal state
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = controlledOnOpenChange || setInternalOpen
+
+  // Reset streaming state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setStreamingSuggestions([])
+      setAnalyzing(false)
+    }
+  }, [open])
 
   // Fetch suggestions
   const { data: suggestionsData } = useSWR<SuggestionsResponse>(
@@ -78,16 +88,63 @@ export function TaskDetailPopover({
     { refreshInterval: 0 } // Don't auto-refresh
   )
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = () => {
     setAnalyzing(true)
+    setError(null)
+    setStreamingSuggestions([])
+
     try {
-      await api.post(`/api/tasks/${task.id}/analyze?user_id=1`)
-      // Refresh suggestions
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
+      const source = new EventSource(`${API_BASE}/api/tasks/${task.id}/analyze/stream?user_id=1`)
+
+      source.addEventListener("suggestion", (event: MessageEvent) => {
+        try {
+          const payload = JSON.parse(event.data)
+          setStreamingSuggestions((prev) => [...prev, payload])
+        } catch (e) {
+          console.error("Failed to parse suggestion event", e)
+        }
+      })
+
+      source.addEventListener("analysis", (event: MessageEvent) => {
+        try {
+          const payload = JSON.parse(event.data)
+          setLocalTask((prev) => ({
+            ...prev,
+            urgency_score: payload?.urgency_score ?? prev.urgency_score,
+            importance_score: payload?.importance_score ?? prev.importance_score,
+            eisenhower_quadrant: payload?.eisenhower_quadrant ?? prev.eisenhower_quadrant,
+            analysis_reasoning: payload?.analysis_reasoning ?? prev.analysis_reasoning,
+          }))
+        } catch (e) {
+          console.error("Failed to parse analysis event", e)
+        }
+      })
+
+      source.addEventListener("done", async () => {
+        source.close()
+        try {
+          const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
+          setLocalTask(refreshedTask)
+          if (onUpdate) {
+            onUpdate(refreshedTask)
+          }
+          mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
+        } catch (e) {
+          console.error("Failed to refresh after streaming", e)
+        } finally {
+          setAnalyzing(false)
+        }
+      })
+
+      source.onerror = (err) => {
+        console.error("Streaming analyze failed:", err)
+        setError("Failed to analyze task")
+        source.close()
+        setAnalyzing(false)
+      }
     } catch (error) {
-      console.error('Analysis failed:', error)
-      setError('Failed to analyze task')
-    } finally {
+      console.error("Analysis failed:", error)
+      setError("Failed to analyze task")
       setAnalyzing(false)
     }
   }
@@ -124,7 +181,8 @@ export function TaskDetailPopover({
     }
   }
 
-  const pendingSuggestions = suggestionsData?.suggestions || []
+  const storedSuggestions = suggestionsData?.suggestions || []
+  const displayedSuggestions = streamingSuggestions.length > 0 ? streamingSuggestions : storedSuggestions
 
   // Auto-save function
   const saveTask = async (updates: Partial<Task>) => {
@@ -325,7 +383,7 @@ export function TaskDetailPopover({
             </h3>
 
             {/* Show analyze button if no analysis yet and no suggestions */}
-            {!analyzing && pendingSuggestions.length === 0 && !localTask.urgency_score && (
+            {!analyzing && displayedSuggestions.length === 0 && !localTask.urgency_score && (
               <Button onClick={handleAnalyze} variant="outline" className="w-full">
                 ⚡ Analyze with AI
               </Button>
@@ -339,9 +397,9 @@ export function TaskDetailPopover({
             )}
 
             {/* Show suggestions if available */}
-            {pendingSuggestions.length > 0 && (
+            {displayedSuggestions.length > 0 && (
               <SuggestionPanel
-                suggestions={pendingSuggestions}
+                suggestions={displayedSuggestions}
                 onApprove={handleApproveSuggestion}
                 onReject={handleRejectSuggestion}
               />

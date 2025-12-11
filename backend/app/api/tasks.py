@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, delete
 from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+import json
 import logging
 
 # Initialize logger
@@ -1021,6 +1023,119 @@ async def analyze_task_suggestions(
             for s in created_suggestions
         ]
     }
+
+
+@router.get("/{task_id}/analyze/stream")
+async def analyze_task_suggestions_stream(
+    task_id: int,
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stream AI suggestions as they are stored.
+
+    Emits Server-Sent Events:
+    - event: suggestion (one per suggestion)
+    - event: analysis (single analysis payload)
+    - event: done (empty object)
+    """
+    from app.services.llm_ollama import OllamaService
+    from app.services.workload_calculator import (
+        calculate_user_workload,
+        get_project_context,
+        get_related_tasks
+    )
+    from app.models.task_suggestion import TaskSuggestion, SuggestionStatus
+
+    # Get task
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Gather context
+    workload = await calculate_user_workload(user_id, db)
+
+    project_context = None
+    if task.project_id:
+        project_context = await get_project_context(task.project_id, db)
+
+    related_tasks = []
+    if task.project_id:
+        related_tasks = await get_related_tasks(task_id, task.project_id, db)
+
+    # Call LLM
+    llm_service = OllamaService()
+
+    task_data = {
+        "title": task.title,
+        "description": task.description,
+        "due_date": task.due_date,
+        "ticktick_priority": task.ticktick_priority,
+        "project_name": task.project_name,
+        "ticktick_tags": task.ticktick_tags or [],
+        "start_date": task.start_date,
+        "repeat_flag": task.repeat_flag,
+        "reminder_time": task.reminder_time,
+        "time_estimate": task.time_estimate,
+        "all_day": task.all_day,
+    }
+
+    try:
+        suggestion_result = await llm_service.generate_suggestions(
+            task_data=task_data,
+            project_context=project_context,
+            related_tasks=related_tasks,
+            user_workload=workload
+        )
+    except Exception as e:
+        logger.error(f"LLM analysis failed for task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+    # Delete old pending suggestions for this task
+    delete_stmt = delete(TaskSuggestion).where(
+        TaskSuggestion.task_id == task_id,
+        TaskSuggestion.status == SuggestionStatus.PENDING
+    )
+    await db.execute(delete_stmt)
+
+    created_suggestions = []
+    for suggestion in suggestion_result.get("suggestions", []):
+        new_suggestion = TaskSuggestion(
+            task_id=task_id,
+            suggestion_type=suggestion["type"],
+            current_value=suggestion.get("current"),
+            suggested_value=suggestion["suggested"],
+            reason=suggestion["reason"],
+            confidence=suggestion["confidence"],
+            status=SuggestionStatus.PENDING
+        )
+        db.add(new_suggestion)
+        await db.flush()
+        await db.refresh(new_suggestion)
+        created_suggestions.append({
+            "id": new_suggestion.id,
+            "type": new_suggestion.suggestion_type,
+            "current": new_suggestion.current_value,
+            "suggested": new_suggestion.suggested_value,
+            "reason": new_suggestion.reason,
+            "confidence": new_suggestion.confidence
+        })
+
+    task.analyzed_at = datetime.utcnow()
+    await db.commit()
+
+    async def event_generator():
+        for suggestion in created_suggestions:
+            yield f"event: suggestion\ndata: {json.dumps(suggestion)}\n\n"
+
+        analysis_payload = suggestion_result.get("analysis", {})
+        yield f"event: analysis\ndata: {json.dumps(analysis_payload)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/analyze/batch")
