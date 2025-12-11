@@ -28,7 +28,19 @@ export function UnsortedTaskCard({
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
+      // Call the analyze API endpoint
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/tasks/${task.id}/analyze`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Analysis failed');
+      }
+
+      // Call parent handler to refresh task
       await onAnalyze(task.id);
+    } catch (error) {
+      console.error('Failed to analyze task:', error);
     } finally {
       setAnalyzing(false);
     }

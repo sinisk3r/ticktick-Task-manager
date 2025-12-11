@@ -12,13 +12,15 @@ import {
   User,
   Inbox,
   ListTodo,
+  RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
+import { QuickAddTaskModal } from "@/components/QuickAddTaskModal";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -29,8 +31,25 @@ interface SidebarProps {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+// Format time ago helper
+const formatTimeAgo = (date: Date): string => {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
+
 export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
   const pathname = usePathname();
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // Fetch unsorted count
   const { data: unsortedData } = useSWR(
@@ -39,6 +58,41 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
     { refreshInterval: 10000 }
   );
   const unsortedCount = unsortedData?.total || 0;
+
+  // Handle TickTick sync
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/tasks/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 1 })
+      });
+
+      if (!response.ok) {
+        throw new Error('Sync failed');
+      }
+
+      const data = await response.json();
+
+      // Refresh all task lists
+      mutate(`${API_BASE}/api/tasks`);
+      mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`);
+      mutate(`${API_BASE}/api/projects`);
+
+      // Update last sync time
+      setLastSyncTime(new Date());
+
+      console.log(`Sync complete: ${data.synced_count || 0} tasks synced, ${data.analyzed_count || 0} analyzed`);
+    } catch (error) {
+      console.error('Sync error:', error);
+      setSyncError('Failed to sync with TickTick');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const navItems = [
     {
@@ -162,9 +216,39 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
             </nav>
 
             {/* Quick Actions (Bottom) */}
-            <div className="p-4 border-t border-sidebar-border">
-              {/* Could add quick add task here later */}
-              <Button className="w-full justify-start gap-2 shadow-sm" size="lg">
+            <div className="p-4 border-t border-sidebar-border space-y-3">
+              {/* Sync Button */}
+              <Button
+                onClick={handleSync}
+                disabled={syncing}
+                variant="secondary"
+                className="w-full justify-start gap-2 shadow-sm"
+                size="lg"
+              >
+                <RefreshCw className={cn("size-5", syncing && "animate-spin")} />
+                <span className="font-medium">
+                  {syncing ? 'Syncing...' : 'Sync with TickTick'}
+                </span>
+              </Button>
+
+              {/* Error Message */}
+              {syncError && (
+                <p className="text-xs text-red-500 px-2">{syncError}</p>
+              )}
+
+              {/* Last Sync Time */}
+              {lastSyncTime && !syncError && (
+                <p className="text-xs text-muted-foreground px-2">
+                  Last sync: {formatTimeAgo(lastSyncTime)}
+                </p>
+              )}
+
+              {/* New Task Button */}
+              <Button
+                className="w-full justify-start gap-2 shadow-sm"
+                size="lg"
+                onClick={() => setQuickAddOpen(true)}
+              >
                 <Plus className="size-5" />
                 <span className="font-medium">New Task</span>
               </Button>
@@ -172,6 +256,9 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Quick Add Task Modal */}
+      <QuickAddTaskModal open={quickAddOpen} onOpenChange={setQuickAddOpen} />
 
       {/* Overlay for mobile */}
       {isMobile && isOpen && (

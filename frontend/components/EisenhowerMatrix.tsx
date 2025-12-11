@@ -1,6 +1,26 @@
 "use client"
 
-import { useEffect, useMemo, useState, type DragEvent } from "react"
+import { useEffect, useState, useRef } from "react"
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragStartEvent,
+  DragOverEvent,
+  DragEndEvent,
+  defaultDropAnimationSideEffects,
+  DropAnimation
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -10,6 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AlertCircle, ChevronDown, ChevronUp, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { SortableCard } from "@/components/dnd/SortableCard"
 
 interface Task {
   id: number
@@ -40,78 +61,27 @@ interface EisenhowerMatrixProps {
   refresh?: () => Promise<void>
 }
 
-const QuadrantCard = ({
-  title,
-  description,
-  tasks,
-  bgColor,
-  borderColor,
-  icon,
-  onDrop,
-  onResetTask,
-  onDragStartTask,
-  onDropTask,
-}: {
-  title: string
-  description: string
-  tasks: Task[]
-  bgColor: string
-  borderColor: string
-  icon: string
-  onDrop: (event: DragEvent) => void
-  onResetTask?: (taskId: number) => Promise<void>
-  onDragStartTask?: (taskId: number) => (event: DragEvent) => void
-  onDropTask?: (taskId: number) => (event: DragEvent) => void
-}) => {
-  return (
-    <Card
-      className={`p-6 ${bgColor} ${borderColor} border-2 h-full min-h-[300px] flex flex-col`}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
-    >
-      <div className="mb-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-2xl">{icon}</span>
-          <h3 className="text-lg font-bold text-foreground">{title}</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">{description}</p>
-        <Badge variant="secondary" className="mt-2">
-          {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-        </Badge>
-      </div>
+// --- Components ---
 
-      <div className="flex-1 space-y-2 overflow-y-auto max-h-[400px]">
-        {tasks.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-8">
-            No tasks in this quadrant
-          </p>
-        ) : (
-          tasks.map((task) => (
-            <TaskPopover
-              key={task.id}
-              task={task}
-              onReset={onResetTask ? () => onResetTask(task.id) : undefined}
-              onDragStart={onDragStartTask ? onDragStartTask(task.id) : undefined}
-              onDrop={onDropTask ? onDropTask(task.id) : undefined}
-            />
-          ))
-        )}
-      </div>
-    </Card>
+function SortableTask({ task, isActiveOverlay, onReset }: { task: Task, isActiveOverlay?: boolean, onReset?: () => void }) {
+  // If this is the overlay, render without sortable wrappers
+  if (isActiveOverlay) {
+    return <TaskCardInner task={task} isOverlay onReset={onReset} />
+  }
+
+  return (
+    <SortableCard
+      id={task.id}
+      data={{ type: "Task", task }}
+      className="mb-2 touch-none"
+      draggingClassName="opacity-30"
+    >
+      {() => <TaskCardInner task={task} onReset={onReset} />}
+    </SortableCard>
   )
 }
 
-const TaskPopover = ({
-  task,
-  onReset,
-  onDragStart,
-  onDrop,
-}: {
-  task: Task
-  onReset?: () => Promise<void>
-  onDragStart?: (event: DragEvent) => void
-  onDrop?: (event: DragEvent) => void
-}) => {
+function TaskCardInner({ task, isOverlay, onReset }: { task: Task, isOverlay?: boolean, onReset?: () => void }) {
   const [expanded, setExpanded] = useState(false)
 
   const truncatedReasoning = task.analysis_reasoning
@@ -123,133 +93,191 @@ const TaskPopover = ({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          className="w-full text-left p-3 rounded-lg bg-background border border-border hover:bg-accent transition-colors"
-          draggable
-          onDragStart={onDragStart}
-          onDragOver={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onDrop={onDrop}
+        <div
+          className={`
+                        w-full text-left p-3 rounded-lg bg-background border border-border 
+                        transition-all cursor-grab active:cursor-grabbing
+                        ${isOverlay ? 'shadow-xl scale-105 border-primary ring-1 ring-primary' : 'hover:bg-accent/50 shadow-sm'}
+                    `}
         >
-          <p className="text-sm font-medium text-foreground truncate">
-            {task.title}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-muted-foreground">U: {task.urgency_score}</span>
-            <span className="text-xs text-muted-foreground">I: {task.importance_score}</span>
-          </div>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96 bg-popover border-border" side="right">
-        <div className="space-y-3">
-          <h4 className="font-semibold text-gray-100 leading-tight">
-            {task.title}
-          </h4>
-
-          {task.description && (
-            <p className="text-sm text-gray-300">
-              {task.description.length > 150
-                ? task.description.substring(0, 150) + "..."
-                : task.description}
+          <div className="flex justify-between items-start pointer-events-none">
+            <p className="text-sm font-medium text-foreground truncate pr-2">
+              {task.title}
             </p>
-          )}
-
-          {/* Urgency Score */}
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-xs text-gray-400">Urgency</span>
-              <span className="text-xs font-semibold text-gray-300">
-                {task.urgency_score}/10
-              </span>
-            </div>
-            <Progress value={task.urgency_score * 10} className="h-2" />
           </div>
 
-          {/* Importance Score */}
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-xs text-gray-400">Importance</span>
-              <span className="text-xs font-semibold text-gray-300">
-                {task.importance_score}/10
-              </span>
-            </div>
-            <Progress value={task.importance_score * 10} className="h-2" />
+          <div className="flex items-center gap-2 mt-1 pointer-events-none">
+            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">U: {task.urgency_score}</span>
+            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">I: {task.importance_score}</span>
           </div>
+        </div>
+      </PopoverTrigger>
 
-          {/* AI Reasoning */}
-          <div className="border-t border-gray-700 pt-3">
-            <div className="flex items-start gap-2">
-              <span className="text-base">💡</span>
+      {/* 
+               We disable the popover content while purely acting as an overlay OR while dragging 
+               But SortableTask logic handles dragging. `isOverlay` is true when it's the "ghost" following mouse.
+               We usually don't want the popover to open on the overlay.
+            */}
+      {!isOverlay && (
+        <PopoverContent className="w-96 bg-popover border-border" side="right">
+          <div className="space-y-3">
+            <h4 className="font-semibold text-gray-100 leading-tight">
+              {task.title}
+            </h4>
+
+            {task.description && (
+              <p className="text-sm text-gray-300">
+                {task.description.length > 150
+                  ? task.description.substring(0, 150) + "..."
+                  : task.description}
+              </p>
+            )}
+
+            <div className="flex gap-4">
               <div className="flex-1">
-                <p className="text-xs text-gray-300 leading-relaxed">
-                  {expanded ? task.analysis_reasoning : truncatedReasoning}
-                </p>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-gray-400">Urgency</span>
+                  <span className="text-xs font-semibold text-gray-300">
+                    {task.urgency_score}/10
+                  </span>
+                </div>
+                <Progress value={task.urgency_score * 10} className="h-1.5" />
+              </div>
+              <div className="flex-1">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-gray-400">Importance</span>
+                  <span className="text-xs font-semibold text-gray-300">
+                    {task.importance_score}/10
+                  </span>
+                </div>
+                <Progress value={task.importance_score * 10} className="h-1.5" />
               </div>
             </div>
 
-            {task.analysis_reasoning && task.analysis_reasoning.length > 120 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpanded(!expanded)}
-                className="w-full mt-2 text-xs text-gray-400 hover:text-gray-200"
-              >
-                {expanded ? (
-                  <>
-                    <ChevronUp className="h-3 w-3 mr-1" />
-                    Show less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="h-3 w-3 mr-1" />
-                    Read more
-                  </>
-                )}
-              </Button>
-            )}
-          </div>
-
-          {/* Metadata */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-700">
-            <span className="text-xs text-gray-500">
-              {new Date(task.created_at).toLocaleDateString()}
-            </span>
-            {task.manual_quadrant_override && (
-              <Badge variant="outline" className="text-[10px]">
-                Manual override
-              </Badge>
-            )}
-            {task.ticktick_task_id && (
-              <Badge variant="outline" className="text-xs">
-                TickTick
-              </Badge>
-            )}
-          </div>
-
-          {task.manual_quadrant_override && (
-            <div className="mt-3 flex items-center justify-between border-t border-gray-700 pt-3">
-              <div className="text-xs text-gray-400">
-                Override: {task.manual_quadrant_override}
-                {task.manual_override_reason ? ` — ${task.manual_override_reason}` : ""}
+            <div className="border-t border-border pt-3 mt-2">
+              <div className="flex items-start gap-2">
+                <span className="text-base">💡</span>
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {expanded ? task.analysis_reasoning : truncatedReasoning}
+                  </p>
+                </div>
               </div>
-              {onReset && (
+
+              {task.analysis_reasoning && task.analysis_reasoning.length > 120 && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-xs text-gray-300 hover:text-gray-50"
-                  onClick={onReset}
+                  onClick={() => setExpanded(!expanded)}
+                  className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground h-6"
                 >
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  Reset
+                  {expanded ? (
+                    <>
+                      <ChevronUp className="h-3 w-3 mr-1" />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-3 w-3 mr-1" />
+                      Read more
+                    </>
+                  )}
                 </Button>
               )}
             </div>
-          )}
-        </div>
-      </PopoverContent>
+
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <span className="text-[10px] text-muted-foreground">
+                {new Date(task.created_at).toLocaleDateString()}
+              </span>
+              {task.manual_quadrant_override && (
+                <Badge variant="outline" className="text-[10px]">
+                  Manual override
+                </Badge>
+              )}
+            </div>
+
+            {task.manual_quadrant_override && (
+              <div className="mt-3 flex items-center justify-between border-t border-gray-700 pt-3">
+                <div className="text-xs text-gray-400">
+                  Override: {task.manual_quadrant_override}
+                </div>
+                {onReset && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-gray-300 hover:text-gray-50"
+                    onClick={onReset}
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Reset
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      )}
     </Popover>
+  )
+}
+
+const QuadrantCard = ({
+  title,
+  description,
+  tasks,
+  bgColor,
+  borderColor,
+  icon,
+  quadrantId,
+  onResetTask,
+}: {
+  title: string
+  description: string
+  tasks: Task[]
+  bgColor: string
+  borderColor: string
+  icon: string
+  quadrantId: string
+  onResetTask?: (taskId: number) => void
+}) => {
+  return (
+    <Card
+      className={`p-6 ${bgColor} ${borderColor} border-2 h-full min-h-[300px] flex flex-col transition-colors duration-200`}
+    >
+      <div className="mb-4 pointer-events-none select-none">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-2xl">{icon}</span>
+          <h3 className="text-lg font-bold text-foreground">{title}</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+        <Badge variant="secondary" className="mt-2">
+          {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+        </Badge>
+      </div>
+
+      <div className="flex-1 overflow-y-auto max-h-[400px] overflow-x-visible p-1 min-h-[100px]">
+        <SortableContext
+          id={quadrantId}
+          items={tasks.map(t => t.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {tasks.length === 0 ? (
+            <div className="h-32 w-full flex items-center justify-center text-sm text-gray-500/50 italic border-2 border-dashed border-gray-500/10 rounded-lg">
+              Drop here
+            </div>
+          ) : (
+            tasks.map((task) => (
+              <SortableTask
+                key={task.id}
+                task={task}
+                onReset={onResetTask ? () => onResetTask(task.id) : undefined}
+              />
+            ))
+          )}
+        </SortableContext>
+      </div>
+    </Card>
   )
 }
 
@@ -258,44 +286,76 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
   const [tasksState, setTasksState] = useState<Task[]>(tasks ?? [])
   const [loading, setLoading] = useState(!controlled)
   const [error, setError] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      // Require a slight move before activating drag so clicks still open the popover
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   const getQuadrant = (task: Task) =>
     task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
 
-  const reorderQuadrant = async (quadrant: string, orderedIds: number[]) => {
-    try {
-      const response = await api.post<TasksResponse>("/api/tasks/reorder", {
-        user_id: 1,
-        quadrant,
-        task_ids: orderedIds,
+  // Helper to split tasks into buckets
+  const getBuckets = (taskList: Task[]) => {
+    const buckets: Record<string, Task[]> = { Q1: [], Q2: [], Q3: [], Q4: [] }
+    taskList.forEach(task => {
+      const q = getQuadrant(task)
+      if (q && buckets[q]) buckets[q].push(task)
+    })
+
+    // Sort each bucket by manual_order or createdAt
+    Object.keys(buckets).forEach(key => {
+      buckets[key].sort((a, b) => {
+        const aOrder = a.manual_order ?? 999999
+        const bOrder = b.manual_order ?? 999999
+        if (aOrder !== bOrder) return aOrder - bOrder
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
-
-      // Update state with the response to ensure consistency
-      if (response.tasks) {
-        const updatedTasks = tasksState.map((t) => {
-          const updated = response.tasks.find((rt) => rt.id === t.id)
-          return updated ? { ...t, ...updated } : t
-        })
-        setAndPropagate(updatedTasks)
-      }
-    } catch (err: any) {
-      console.error("Failed to reorder tasks:", err)
-      setError(err.message || "Failed to reorder tasks")
-      // Refetch to restore correct state
-      if (!controlled) {
-        await fetchTasks()
-      }
-      throw err // Re-throw so caller knows it failed
-    }
+    })
+    return buckets
   }
 
-  const setAndPropagate = (next: Task[]) => {
-    setTasksState(next)
-    if (onTasksUpdate) {
-      onTasksUpdate(next)
+  // State to track order in each quadrant
+  const [quadrantIds, setQuadrantIds] = useState<Record<string, number[]>>({ Q1: [], Q2: [], Q3: [], Q4: [] })
+  const quadrantIdsRef = useRef(quadrantIds)
+
+  const arraysEqual = (a: number[], b: number[]) =>
+    a.length === b.length && a.every((val, idx) => val === b[idx])
+
+  const quadrantsEqual = (next: Record<string, number[]>, prev: Record<string, number[]>) =>
+    ["Q1", "Q2", "Q3", "Q4"].every(key => arraysEqual(next[key], prev[key]))
+
+  // Keep a ref in sync for async handlers that need the latest order
+  useEffect(() => {
+    quadrantIdsRef.current = quadrantIds
+  }, [quadrantIds])
+
+  // Initialize Quadrant State from Tasks
+  useEffect(() => {
+    // If we are actively dragging, DO NOT SYNC from props/API, or we lose position.
+    if (activeId) return;
+
+    if (tasksState.length > 0) {
+      const buckets = getBuckets(tasksState);
+      const next = {
+        Q1: buckets.Q1.map(t => t.id),
+        Q2: buckets.Q2.map(t => t.id),
+        Q3: buckets.Q3.map(t => t.id),
+        Q4: buckets.Q4.map(t => t.id),
+      }
+
+      setQuadrantIds(prev => quadrantsEqual(next, prev) ? prev : next)
     }
-  }
+  }, [tasksState, activeId]);
+
 
   const fetchTasks = async () => {
     if (controlled) return
@@ -308,8 +368,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
       })
 
       const response = await api.get<TasksResponse>(`/api/tasks?${params.toString()}`)
-
-      setAndPropagate(response.tasks || [])
+      setTasksState(response.tasks || [])
     } catch (err: any) {
       console.error("Failed to fetch tasks:", err)
       setError(err.message || "Failed to load tasks")
@@ -327,29 +386,149 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
     fetchTasks()
   }, [controlled, tasks])
 
-  const mergeTask = (updated: Task) => {
-    const exists = tasksState.some((t) => t.id === updated.id)
-    const next = exists
-      ? tasksState.map((t) => (t.id === updated.id ? { ...t, ...updated } : t))
-      : [...tasksState, updated]
-    setAndPropagate(next)
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event
+    setActiveId(active.id as number)
+    setActiveTask(tasksState.find(t => t.id === active.id) || null)
   }
 
-  const handleQuadrantChange = async (taskId: number, targetQuadrant: string) => {
-    setSavingTaskId(taskId)
-    setError(null)
+  const handleDragOver = (event: DragOverEvent) => {
+    const { active, over } = event
+    if (!over) return
+
+    // Find the containers
+    const activeContainer = findContainer(active.id as number)
+    const overContainer = (Object.keys(quadrantIds).includes(over.id as string))
+      ? over.id as string
+      : findContainer(over.id as number)
+
+    if (!activeContainer || !overContainer || activeContainer === overContainer) {
+      return
+    }
+
+    // Moving between quadrants
+    setQuadrantIds(prev => {
+      const activeItems = prev[activeContainer] || []
+      const overItems = prev[overContainer] || []
+
+      const activeIndex = activeItems.indexOf(active.id as number)
+      if (activeIndex === -1) return prev
+
+      const overIndex = (Object.keys(prev).includes(over.id as string))
+        ? overItems.length // place at end of container
+        : overItems.indexOf(over.id as number)
+
+        const isBelowOverItem = over &&
+          active.rect.current.translated &&
+        active.rect.current.translated.top > over.rect.top + over.rect.height
+
+      const modifier = isBelowOverItem ? 1 : 0
+      const newIndex = overIndex >= 0 ? overIndex + modifier : overItems.length
+      const clampedIndex = Math.max(0, Math.min(newIndex, overItems.length))
+
+      const nextActive = activeItems.filter(item => item !== active.id)
+      const nextOver = [...overItems]
+      nextOver.splice(clampedIndex, 0, active.id as number)
+
+      const nextState = {
+        ...prev,
+        [activeContainer]: nextActive,
+        [overContainer]: nextOver
+      }
+
+      return quadrantsEqual(nextState, prev) ? prev : nextState
+    })
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    const id = active.id as number
+
+    // Cleanup active state
+    setActiveId(null)
+    setActiveTask(null)
+
+    if (!over) return;
+
+    const currentQuadrants = quadrantIdsRef.current
+    const activeContainer = findContainer(active.id as number)
+    const overContainer = (Object.keys(currentQuadrants).includes(over.id as string))
+      ? over.id as string
+      : findContainer(over.id as number)
+
+    if (activeContainer && overContainer) {
+      // Calculate final index in the destination using the latest state
+      const overIndex = currentQuadrants[overContainer].indexOf(over.id as number)
+      const activeIndex = currentQuadrants[activeContainer].indexOf(active.id as number)
+
+      if (activeContainer === overContainer) {
+        if (activeIndex !== overIndex) {
+          const newOrder = arrayMove(currentQuadrants[activeContainer], activeIndex, overIndex)
+          setQuadrantIds(prev => ({
+            ...prev,
+            [activeContainer]: newOrder
+          }))
+          // Persist Order
+          await persistReorder(activeContainer, newOrder)
+        }
+      } else {
+        // Moved between containers 
+        // 1. Update task metadata (quadrant)
+        await persistQuadrantChange(id, overContainer)
+
+        // 2. Persist order of destination container
+        // The state `quadrantIds` is already updated by `handleDragOver`.
+        const newOrder = quadrantIds[overContainer]
+        await persistReorder(overContainer, newOrder)
+      }
+    }
+  }
+
+  const findContainer = (id: number) => {
+    return Object.keys(quadrantIds).find(key => quadrantIds[key].includes(id));
+  }
+
+  const persistQuadrantChange = async (taskId: number, newQuadrant: string) => {
     try {
-      const updated = await api.patch<Task>(`/api/tasks/${taskId}/quadrant`, {
-        manual_quadrant: targetQuadrant,
+      // Optimistic task update
+      setTasksState(prev => prev.map(t => {
+        if (t.id === taskId) {
+          return { ...t, manual_quadrant_override: newQuadrant, manual_override_reason: "Moved in matrix" }
+        }
+        return t
+      }))
+
+      await api.patch(`/api/tasks/${taskId}/quadrant`, {
+        manual_quadrant: newQuadrant,
         reason: "Moved in matrix view",
-        source: "matrix",
+        source: "matrix"
       })
-      mergeTask(updated)
-    } catch (err: any) {
-      console.error("Failed to update quadrant:", err)
-      setError(err.message || "Failed to update task quadrant")
-    } finally {
-      setSavingTaskId(null)
+    } catch (err) {
+      console.error("Failed to update quadrant", err)
+    }
+  }
+
+  const persistReorder = async (quadrant: string, orderedIds: number[]) => {
+    try {
+      // Update local task state manual_order for consistency
+      setTasksState(prev => {
+        return prev.map(t => {
+          const idx = orderedIds.indexOf(t.id)
+          if (idx !== -1 && (t.manual_quadrant_override === quadrant || t.eisenhower_quadrant === quadrant || t.effective_quadrant === quadrant)) {
+            return { ...t, manual_order: idx }
+          }
+          return t
+        })
+      })
+
+      await api.post("/api/tasks/reorder", {
+        user_id: 1,
+        quadrant,
+        task_ids: orderedIds,
+      })
+    } catch (err) {
+      console.error("Reorder failed", err)
     }
   }
 
@@ -360,7 +539,9 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
       const updated = await api.patch<Task>(`/api/tasks/${taskId}/quadrant`, {
         reset_to_ai: true,
       })
-      mergeTask(updated)
+      // Updates state
+      setTasksState(prev => prev.map(t => t.id === taskId ? updated : t))
+      if (onTasksUpdate) onTasksUpdate(tasksState.map(t => t.id === taskId ? updated : t))
     } catch (err: any) {
       setError(err.message || "Failed to reset override")
     } finally {
@@ -368,97 +549,15 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
     }
   }
 
-  const handleDrop = (quadrant: string) => async (event: DragEvent) => {
-    event.preventDefault()
-    const taskId = Number(event.dataTransfer.getData("task-id"))
-    if (!taskId) return
-    const task = tasksState.find((t) => t.id === taskId)
-    if (!task) return
-    const currentQuadrant = getQuadrant(task)
-    if (currentQuadrant === quadrant) return
-    await handleQuadrantChange(taskId, quadrant)
+  const dropAnimation: DropAnimation = {
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: {
+        active: {
+          opacity: '0.5',
+        },
+      },
+    }),
   }
-
-  const onDragStart = (taskId: number) => (event: DragEvent) => {
-    event.stopPropagation()
-    event.dataTransfer.setData("task-id", String(taskId))
-    event.dataTransfer.effectAllowed = "move"
-  }
-
-  const handleDropOnTask = (quadrant: string, targetTaskId: number) => async (event: DragEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    const taskId = Number(event.dataTransfer.getData("task-id"))
-    if (!taskId || taskId === targetTaskId) return
-
-    const task = tasksState.find((t) => t.id === taskId)
-    if (!task) return
-
-    const currentQuadrant = getQuadrant(task)
-
-    // Build the new order for the target quadrant
-    // Start with current bucket, but if task is moving from another quadrant, we need to add it
-    let bucket = [...(quadrantBuckets[quadrant as keyof typeof quadrantBuckets] || [])]
-
-    // If moving across quadrants, add the task to the bucket (it won't be there yet)
-    if (currentQuadrant !== quadrant) {
-      bucket = [...bucket, { ...task, manual_quadrant_override: quadrant }]
-    }
-
-    // Remove the dragged task from its current position
-    const withoutDragged = bucket.filter((t) => t.id !== taskId)
-
-    // Find where to insert it (before the target task)
-    const targetIndex = withoutDragged.findIndex((t) => t.id === targetTaskId)
-    if (targetIndex === -1) return
-
-    // Insert the task at the target position
-    withoutDragged.splice(targetIndex, 0, { ...task, manual_quadrant_override: quadrant })
-
-    // Update local state optimistically
-    const newState = tasksState.map((t) => {
-      if (t.id === taskId) {
-        return { ...t, manual_quadrant_override: quadrant }
-      }
-      return t
-    })
-    setAndPropagate(newState)
-
-    try {
-      // If moving across quadrants, update quadrant first
-      if (currentQuadrant !== quadrant) {
-        await handleQuadrantChange(taskId, quadrant)
-      }
-
-      // Then persist the new order for the target quadrant
-      await reorderQuadrant(quadrant, withoutDragged.map((t) => t.id))
-    } catch (err) {
-      // On error, refetch to restore correct state
-      if (!controlled) {
-        await fetchTasks()
-      }
-    }
-  }
-
-  const quadrantBuckets = useMemo(() => {
-    const buckets: Record<string, Task[]> = { Q1: [], Q2: [], Q3: [], Q4: [] }
-    tasksState.forEach((task) => {
-      const q = getQuadrant(task)
-      if (q && buckets[q as keyof typeof buckets]) {
-        buckets[q as keyof typeof buckets].push(task)
-      }
-    })
-    // Sort each bucket by manual_order (null values at end), then created_at
-    Object.keys(buckets).forEach((key) => {
-      buckets[key].sort((a, b) => {
-        const aOrder = a.manual_order ?? 999999
-        const bOrder = b.manual_order ?? 999999
-        if (aOrder !== bOrder) return aOrder - bOrder
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      })
-    })
-    return buckets
-  }, [tasksState])
 
   if (loading) {
     return (
@@ -495,68 +594,67 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
         )}
       </div>
 
-      {/* Matrix Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Q1: Urgent & Important (Top Left) */}
-        <QuadrantCard
-          title="Q1: Do First"
-          description="Urgent & Important - Handle immediately"
-          tasks={quadrantBuckets.Q1}
-          bgColor="bg-red-100 dark:bg-red-900/20"
-          borderColor="border-red-200 dark:border-red-700"
-          icon="🔴"
-          onDrop={handleDrop("Q1")}
-          onResetTask={handleReset}
-          onDragStartTask={onDragStart}
-          onDropTask={(taskId) => handleDropOnTask("Q1", taskId)}
-        />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <QuadrantCard
+            title="Q1: Do First"
+            description="Urgent & Important"
+            tasks={quadrantIds.Q1.map(id => tasksState.find(t => t.id === id)).filter(Boolean) as Task[]}
+            bgColor="bg-red-500/10"
+            borderColor="border-red-500/20"
+            icon="🔴"
+            quadrantId="Q1"
+            onResetTask={handleReset}
+          />
 
-        {/* Q2: Not Urgent, Important (Top Right) */}
-        <QuadrantCard
-          title="Q2: Schedule"
-          description="Not Urgent, Important - Plan for later"
-          tasks={quadrantBuckets.Q2}
-          bgColor="bg-green-100 dark:bg-green-900/20"
-          borderColor="border-green-200 dark:border-green-700"
-          icon="🟢"
-          onDrop={handleDrop("Q2")}
-          onResetTask={handleReset}
-          onDragStartTask={onDragStart}
-          onDropTask={(taskId) => handleDropOnTask("Q2", taskId)}
-        />
+          <QuadrantCard
+            title="Q2: Schedule"
+            description="Not Urgent, Important"
+            tasks={quadrantIds.Q2.map(id => tasksState.find(t => t.id === id)).filter(Boolean) as Task[]}
+            bgColor="bg-green-500/10"
+            borderColor="border-green-500/20"
+            icon="🟢"
+            quadrantId="Q2"
+            onResetTask={handleReset}
+          />
 
-        {/* Q3: Urgent, Not Important (Bottom Left) */}
-        <QuadrantCard
-          title="Q3: Delegate"
-          description="Urgent, Not Important - Consider delegating"
-          tasks={quadrantBuckets.Q3}
-          bgColor="bg-yellow-100 dark:bg-yellow-900/20"
-          borderColor="border-yellow-200 dark:border-yellow-700"
-          icon="🟡"
-          onDrop={handleDrop("Q3")}
-          onResetTask={handleReset}
-          onDragStartTask={onDragStart}
-          onDropTask={(taskId) => handleDropOnTask("Q3", taskId)}
-        />
+          <QuadrantCard
+            title="Q3: Delegate"
+            description="Urgent, Not Important"
+            tasks={quadrantIds.Q3.map(id => tasksState.find(t => t.id === id)).filter(Boolean) as Task[]}
+            bgColor="bg-yellow-500/10"
+            borderColor="border-yellow-500/20"
+            icon="🟡"
+            quadrantId="Q3"
+            onResetTask={handleReset}
+          />
 
-        {/* Q4: Neither (Bottom Right) */}
-        <QuadrantCard
-          title="Q4: Eliminate"
-          description="Neither Urgent nor Important - Minimize time"
-          tasks={quadrantBuckets.Q4}
-          bgColor="bg-blue-100 dark:bg-blue-900/20"
-          borderColor="border-blue-200 dark:border-blue-700"
-          icon="🔵"
-          onDrop={handleDrop("Q4")}
-          onResetTask={handleReset}
-          onDragStartTask={onDragStart}
-          onDropTask={(taskId) => handleDropOnTask("Q4", taskId)}
-        />
-      </div>
+          <QuadrantCard
+            title="Q4: Eliminate"
+            description="Neither Urgent nor Important"
+            tasks={quadrantIds.Q4.map(id => tasksState.find(t => t.id === id)).filter(Boolean) as Task[]}
+            bgColor="bg-blue-500/10"
+            borderColor="border-blue-500/20"
+            icon="🔵"
+            quadrantId="Q4"
+            onResetTask={handleReset}
+          />
+        </div>
+
+        <DragOverlay dropAnimation={dropAnimation}>
+          {activeTask ? <SortableTask task={activeTask} isActiveOverlay /> : null}
+        </DragOverlay>
+      </DndContext>
 
       {savingTaskId && (
-        <div className="text-xs text-gray-400">
-          Updating task #{savingTaskId}...
+        <div className="text-xs text-gray-400 fixed bottom-4 right-4 bg-background border border-border p-2 rounded shadow">
+          Updating task...
         </div>
       )}
     </div>

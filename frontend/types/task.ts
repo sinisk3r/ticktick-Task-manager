@@ -25,3 +25,16 @@ export interface TasksResponse {
   tasks: Task[]
   total: number
 }
+
+export interface Suggestion {
+  id: number
+  type: string
+  current: any
+  suggested: any
+  reason: string
+  confidence: number
+}
+
+export interface SuggestionsResponse {
+  suggestions: Suggestion[]
+}

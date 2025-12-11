@@ -3,10 +3,14 @@ Task CRUD API endpoints with LLM analysis integration.
 """
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, delete
 from pydantic import BaseModel, Field
+import logging
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.models.task import Task, TaskStatus, EisenhowerQuadrant
@@ -160,21 +164,20 @@ async def create_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new task and sync to TickTick.
+    Create a new task (NO automatic LLM analysis).
 
     Tasks are created as unsorted (is_sorted=False) by default.
-    They will appear in the Unsorted list until manually sorted or analyzed.
+    They will appear in the Unsorted list until manually analyzed.
 
-    The task description will be analyzed by the LLM to determine:
-    - Urgency score (1-10)
-    - Importance score (1-10)
-    - Eisenhower quadrant (Q1/Q2/Q3/Q4)
-    - Analysis reasoning
+    NOTE: LLM analysis is NOT performed automatically.
+    Users must:
+    1. Use "Get AI Suggestions" in QuickAddModal before creating, OR
+    2. Click "Analyze" button on task after creation
     """
     import logging
     logger = logging.getLogger(__name__)
 
-    # Create task with basic info (unsorted by default)
+    # Create task with basic info (unsorted, no analysis)
     new_task = Task(
         user_id=task_data.user_id,
         title=task_data.title,
@@ -184,65 +187,23 @@ async def create_task(
         is_sorted=False  # Start in unsorted list
     )
 
-    # Perform LLM analysis if description is provided
-    # NOTE: Even with analysis, task stays unsorted until user approves
-    if task_data.description and task_data.description.strip():
-        try:
-            ollama = OllamaService()
+    # NOTE: NO automatic LLM analysis.
+    # Task is created as-is without urgency/importance scores.
+    # User must explicitly request analysis via:
+    # - "Get AI Suggestions" button in QuickAddModal (before creating)
+    # - "Analyze" button on existing task (after creating)
 
-            # Check if Ollama is available
-            if await ollama.health_check():
-                profile_context = await _get_profile_context(task_data.user_id, db)
-                analysis = await ollama.analyze_task(task_data.description, profile_context=profile_context)
-
-                # Update task with analysis results (but keep is_sorted=False)
-                new_task.urgency_score = float(analysis.urgency)
-                new_task.importance_score = float(analysis.importance)
-                new_task.eisenhower_quadrant = EisenhowerQuadrant(analysis.quadrant)
-                new_task.analysis_reasoning = analysis.reasoning
-                new_task.analyzed_at = datetime.utcnow()
-            else:
-                # Ollama not available - task will be created without analysis
-                print("[WARN] Ollama not available, task created without analysis")
-        except Exception as e:
-            # Log error but don't fail task creation
-            print(f"[ERROR] LLM analysis failed: {str(e)}")
-
-    # Save to database first
+    # Save to database
     db.add(new_task)
-    await db.flush()
+    await db.commit()
     await db.refresh(new_task)
 
-    # Push to TickTick if user is connected
-    user_result = await db.execute(select(User).where(User.id == task_data.user_id))
-    user = user_result.scalar_one_or_none()
+    # NOTE: Tasks are NOT automatically synced to TickTick on creation.
+    # Users must explicitly click the "Sync with TickTick" button to push changes.
+    # Future enhancement: Add auto-sync setting in user preferences.
 
-    if user and user.ticktick_access_token:
-        try:
-            from app.services.ticktick import TickTickService
-            ticktick_service = TickTickService(user=user)
+    logger.info(f"Created task {new_task.id} (local only - not synced to TickTick)")
 
-            # Create task in TickTick
-            ticktick_task = await ticktick_service.create_task({
-                "title": new_task.title,
-                "content": new_task.description or "",
-            }, db)
-
-            # Store TickTick ID for future sync
-            new_task.ticktick_task_id = ticktick_task.get("id")
-            new_task.ticktick_project_id = ticktick_task.get("projectId")
-            new_task.last_synced_at = datetime.utcnow()
-            await db.commit()
-
-            logger.info(f"Created task {new_task.id} and synced to TickTick")
-        except Exception as e:
-            # Log error but don't fail local creation if TickTick sync fails
-            logger.error(f"Failed to sync new task to TickTick: {e}")
-            await db.commit()  # Still commit local task
-    else:
-        await db.commit()
-
-    await db.refresh(new_task)
     return new_task
 
 
@@ -526,16 +487,20 @@ async def get_task(
 
 
 @router.put("/{task_id}", response_model=TaskResponse)
+@router.patch("/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: int,
     task_update: TaskUpdate,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Update a task and sync changes to TickTick.
+    Update a task (local changes only - does NOT auto-sync to TickTick).
 
     Only fields provided in the request will be updated.
     Returns 404 if task not found.
+
+    NOTE: Changes are saved locally only. Users must click "Sync with TickTick"
+    to push changes to the cloud. Future enhancement: Add auto-sync setting.
     """
     from app.services.ticktick import TickTickService
     import logging
@@ -568,29 +533,16 @@ async def update_task(
     # Update timestamp
     task.updated_at = datetime.utcnow()
 
-    # Commit local changes first
+    # Commit local changes
     await db.commit()
     await db.refresh(task)
 
-    # Push to TickTick if task is synced from TickTick and we have changes
-    if task.ticktick_task_id and changes:
-        try:
-            # Get user for TickTick service
-            user_result = await db.execute(select(User).where(User.id == task.user_id))
-            user = user_result.scalar_one_or_none()
+    # NOTE: Changes are NOT automatically synced to TickTick.
+    # Users must explicitly click "Sync with TickTick" button.
+    # This gives users full control over when cloud sync happens.
 
-            if user and user.ticktick_access_token:
-                ticktick_service = TickTickService(user=user)
-                await ticktick_service.update_task(task.ticktick_task_id, changes, db)
-                task.last_synced_at = datetime.utcnow()
-                await db.commit()
-                logger.info(f"Synced task {task_id} changes to TickTick: {list(changes.keys())}")
-            else:
-                logger.warning(f"User {task.user_id} has no TickTick access token, skipping sync")
-        except Exception as e:
-            # Log error but don't block local update
-            logger.error(f"Failed to sync task {task_id} to TickTick: {e}")
-            # Could add a sync_status field to track failures in future
+    if changes:
+        logger.info(f"Updated task {task_id} locally (not synced): {list(changes.keys())}")
 
     return task
 
@@ -707,27 +659,16 @@ async def delete_task(
         task.status = TaskStatus.DELETED
         task.updated_at = datetime.utcnow()
         await db.commit()
+        logger.info(f"Soft deleted task {task_id} locally (not synced to TickTick)")
     else:
         # Hard delete - remove from database
         await db.delete(task)
         await db.commit()
+        logger.info(f"Hard deleted task {task_id} locally (not synced to TickTick)")
 
-    # Push deletion to TickTick if task was synced
-    if ticktick_task_id and ticktick_project_id:
-        try:
-            # Get user for TickTick service
-            user_result = await db.execute(select(User).where(User.id == user_id))
-            user = user_result.scalar_one_or_none()
-
-            if user and user.ticktick_access_token:
-                ticktick_service = TickTickService(user=user)
-                await ticktick_service.delete_task(ticktick_task_id, ticktick_project_id, db)
-                logger.info(f"Deleted task {task_id} from TickTick")
-            else:
-                logger.warning(f"User {user_id} has no TickTick access token, skipping sync")
-        except Exception as e:
-            # Log error but don't block local deletion
-            logger.error(f"Failed to delete task {task_id} from TickTick: {e}")
+    # NOTE: Deletions are NOT automatically synced to TickTick.
+    # Users must click "Sync with TickTick" to push deletions.
+    # This prevents accidental permanent data loss in the cloud.
 
     return None
 
@@ -756,17 +697,20 @@ async def sync_ticktick_tasks(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Sync tasks and projects from TickTick for a user.
+    Sync tasks and projects from TickTick for a user (NO automatic LLM analysis).
 
     This endpoint:
     1. Fetches user's TickTick access token from database
     2. Syncs projects from TickTick to local database FIRST
     3. Calls TickTick API to get all tasks with comprehensive metadata
     4. Links tasks to projects via project_id
-    5. For each task, performs LLM analysis (if description exists)
-    6. Saves tasks to database with analysis results
+    5. Saves tasks to database WITHOUT running LLM analysis
+    6. Users must explicitly click "Analyze" on tasks to run LLM
 
-    Returns count of synced tasks, projects, and analysis results.
+    Returns count of synced tasks and projects.
+
+    NOTE: LLM analysis is NOT performed during sync. Users have full control
+    over which tasks to analyze via the "Analyze" button in the UI.
 
     Raises:
         HTTPException: If user not found or TickTick not connected
@@ -789,7 +733,6 @@ async def sync_ticktick_tasks(
 
     # Initialize counters
     synced_count = 0
-    analyzed_count = 0
     failed_count = 0
 
     # STEP 1: Sync projects first
@@ -813,10 +756,8 @@ async def sync_ticktick_tasks(
         # STEP 2: Fetch tasks from TickTick with full metadata
         ticktick_tasks = await ticktick_service_instance.get_tasks(user.ticktick_access_token)
 
-        # Initialize LLM service
-        ollama = OllamaService()
-        ollama_available = await ollama.health_check()
-        profile_context = await _get_profile_context(user_id, db)
+        # NOTE: LLM analysis is NOT performed during sync.
+        # Users must explicitly click "Analyze" on tasks they want analyzed.
 
         # Process each task
         for task_data in ticktick_tasks:
@@ -843,53 +784,28 @@ async def sync_ticktick_tasks(
                 )
                 existing_task = existing_task_result.scalar_one_or_none()
 
-                # Prepare task description for analysis
-                task_description = task_data.get("description") or task_data.get("title", "")
-
-                # Perform LLM analysis if Ollama is available and task has description
-                analysis_result = None
-                if ollama_available and task_description.strip():
-                    try:
-                        analysis_result = await ollama.analyze_task(
-                            task_description,
-                            profile_context=profile_context
-                        )
-                        analyzed_count += 1
-                    except Exception as e:
-                        logger.warning(f"Analysis failed for task {task_id}: {str(e)}")
-
                 if existing_task:
-                    # Update existing task with new data
+                    # Update existing task with new data from TickTick
                     for key, value in task_data.items():
                         if hasattr(existing_task, key) and key not in ["id", "user_id", "created_at"]:
                             setattr(existing_task, key, value)
 
-                    # Update analysis if available
-                    if analysis_result:
-                        existing_task.urgency_score = float(analysis_result.urgency)
-                        existing_task.importance_score = float(analysis_result.importance)
-                        existing_task.eisenhower_quadrant = EisenhowerQuadrant(analysis_result.quadrant)
-                        existing_task.analysis_reasoning = analysis_result.reasoning
-                        existing_task.analyzed_at = datetime.utcnow()
+                    # NOTE: Preserve existing analysis (don't overwrite)
+                    # Users can re-analyze manually if they want fresh analysis
 
                     existing_task.sync_version += 1
                     existing_task.updated_at = datetime.utcnow()
 
                 else:
-                    # Create new task (unsorted by default)
+                    # Create new task (unsorted, no analysis)
                     new_task = Task(
                         user_id=user_id,
                         **task_data
                     )
 
-                    # Add analysis results if available
-                    # NOTE: Even with analysis, task stays unsorted until user approves
-                    if analysis_result:
-                        new_task.urgency_score = float(analysis_result.urgency)
-                        new_task.importance_score = float(analysis_result.importance)
-                        new_task.eisenhower_quadrant = EisenhowerQuadrant(analysis_result.quadrant)
-                        new_task.analysis_reasoning = analysis_result.reasoning
-                        new_task.analyzed_at = datetime.utcnow()
+                    # NOTE: Task created WITHOUT analysis.
+                    # Will appear in "Unsorted" list.
+                    # User must click "Analyze" to get AI suggestions.
 
                     db.add(new_task)
 
@@ -905,14 +821,11 @@ async def sync_ticktick_tasks(
 
         # Prepare response message
         project_count = len(projects)
-        if not ollama_available:
-            message = f"Synced {project_count} projects and {synced_count} tasks from TickTick (LLM analysis unavailable)"
-        else:
-            message = f"Successfully synced {project_count} projects and {synced_count} tasks from TickTick ({analyzed_count} analyzed)"
+        message = f"Successfully synced {project_count} projects and {synced_count} tasks from TickTick (no auto-analysis)"
 
         return SyncResponse(
             synced_count=synced_count,
-            analyzed_count=analyzed_count,
+            analyzed_count=0,  # Always 0 - no auto-analysis
             failed_count=failed_count,
             message=message
         )
@@ -922,4 +835,466 @@ async def sync_ticktick_tasks(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to sync TickTick tasks: {str(e)}"
+        )
+
+
+# ============================================================================
+# SUGGESTION API ENDPOINTS (Phase 5)
+# ============================================================================
+
+
+@router.post("/{task_id}/analyze")
+async def analyze_task_suggestions(
+    task_id: int,
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    User-initiated LLM analysis for a task.
+    Generates suggestions and stores in TaskSuggestion model.
+
+    This endpoint:
+    1. Fetches task details and context (project, related tasks, user workload)
+    2. Calls LLM service to generate suggestions
+    3. Stores suggestions in TaskSuggestion table
+    4. Returns analysis and suggestions for user review
+    """
+    from app.services.llm_ollama import OllamaService
+    from app.services.workload_calculator import (
+        calculate_user_workload,
+        get_project_context,
+        get_related_tasks
+    )
+    from app.models.task_suggestion import TaskSuggestion, SuggestionStatus
+
+    # Get task
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Gather context
+    workload = await calculate_user_workload(user_id, db)
+
+    project_context = None
+    if task.project_id:
+        project_context = await get_project_context(task.project_id, db)
+
+    related_tasks = []
+    if task.project_id:
+        related_tasks = await get_related_tasks(task_id, task.project_id, db)
+
+    # Call LLM
+    llm_service = OllamaService()
+
+    task_data = {
+        "title": task.title,
+        "description": task.description,
+        "due_date": task.due_date,
+        "ticktick_priority": task.ticktick_priority,
+        "project_name": task.project_name,
+        "ticktick_tags": task.ticktick_tags or [],
+        "start_date": task.start_date
+    }
+
+    try:
+        suggestion_result = await llm_service.generate_suggestions(
+            task_data=task_data,
+            project_context=project_context,
+            related_tasks=related_tasks,
+            user_workload=workload
+        )
+    except Exception as e:
+        logger.error(f"LLM analysis failed for task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+    # Delete old pending suggestions for this task
+    delete_stmt = delete(TaskSuggestion).where(
+        TaskSuggestion.task_id == task_id,
+        TaskSuggestion.status == SuggestionStatus.PENDING
+    )
+    await db.execute(delete_stmt)
+
+    # Store new suggestions
+    created_suggestions = []
+    for suggestion in suggestion_result.get("suggestions", []):
+        new_suggestion = TaskSuggestion(
+            task_id=task_id,
+            suggestion_type=suggestion["type"],
+            current_value=suggestion.get("current"),
+            suggested_value=suggestion["suggested"],
+            reason=suggestion["reason"],
+            confidence=suggestion["confidence"],
+            status=SuggestionStatus.PENDING
+        )
+        db.add(new_suggestion)
+        created_suggestions.append(new_suggestion)
+
+    # Update task's analyzed_at timestamp
+    task.analyzed_at = datetime.utcnow()
+
+    await db.commit()
+
+    # Refresh to get IDs
+    for suggestion in created_suggestions:
+        await db.refresh(suggestion)
+
+    return {
+        "task_id": task_id,
+        "analysis": suggestion_result.get("analysis", {}),
+        "suggestions": [
+            {
+                "id": s.id,
+                "type": s.suggestion_type,
+                "current": s.current_value,
+                "suggested": s.suggested_value,
+                "reason": s.reason,
+                "confidence": s.confidence
+            }
+            for s in created_suggestions
+        ]
+    }
+
+
+@router.post("/analyze/batch")
+async def analyze_tasks_batch(
+    task_ids: List[int] = Body(...),
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Analyze multiple tasks in batch.
+
+    Each task is analyzed independently. Errors for individual tasks don't
+    stop the batch - failed tasks are reported in the results.
+    """
+    results = []
+
+    for task_id in task_ids:
+        try:
+            # Call the single-task endpoint directly
+            result = await analyze_task_suggestions(task_id, user_id, db)
+            results.append({"task_id": task_id, "status": "success", "data": result})
+        except HTTPException as e:
+            logger.error(f"Batch analysis failed for task {task_id}: {e.detail}")
+            results.append({"task_id": task_id, "status": "error", "error": e.detail})
+        except Exception as e:
+            logger.error(f"Batch analysis failed for task {task_id}: {e}")
+            results.append({"task_id": task_id, "status": "error", "error": str(e)})
+
+    return {
+        "total": len(task_ids),
+        "successful": sum(1 for r in results if r["status"] == "success"),
+        "failed": sum(1 for r in results if r["status"] == "error"),
+        "results": results
+    }
+
+
+@router.get("/{task_id}/suggestions")
+async def get_task_suggestions(
+    task_id: int,
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get pending suggestions for a task.
+
+    Returns all pending (not yet approved/rejected) suggestions generated
+    by the LLM analysis for this task.
+    """
+    from app.models.task_suggestion import TaskSuggestion, SuggestionStatus
+
+    # Verify task ownership
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Get pending suggestions
+    stmt = select(TaskSuggestion).where(
+        TaskSuggestion.task_id == task_id,
+        TaskSuggestion.status == SuggestionStatus.PENDING
+    ).order_by(TaskSuggestion.created_at.desc())
+
+    result = await db.execute(stmt)
+    suggestions = result.scalars().all()
+
+    return {
+        "task_id": task_id,
+        "suggestions": [
+            {
+                "id": s.id,
+                "type": s.suggestion_type,
+                "current": s.current_value,
+                "suggested": s.suggested_value,
+                "reason": s.reason,
+                "confidence": s.confidence,
+                "created_at": s.created_at.isoformat() if s.created_at else None
+            }
+            for s in suggestions
+        ]
+    }
+
+
+@router.post("/{task_id}/suggestions/approve")
+async def approve_suggestions(
+    task_id: int,
+    suggestion_types: List[str] = Body(..., embed=True),
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Approve specific suggestions (or all).
+
+    Accepts a list of suggestion types to approve (e.g., ["priority", "tags"])
+    or ["all"] to approve all pending suggestions.
+
+    This endpoint:
+    1. Fetches pending suggestions of the specified types
+    2. Applies the suggested values to the task
+    3. Marks suggestions as approved
+    4. Syncs changes to TickTick if the task is connected
+    """
+    from app.models.task_suggestion import TaskSuggestion, SuggestionStatus
+    from app.services.ticktick import TickTickService
+
+    # Get task
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Get pending suggestions
+    stmt = select(TaskSuggestion).where(
+        TaskSuggestion.task_id == task_id,
+        TaskSuggestion.status == SuggestionStatus.PENDING
+    )
+
+    if "all" not in suggestion_types:
+        stmt = stmt.where(TaskSuggestion.suggestion_type.in_(suggestion_types))
+
+    result = await db.execute(stmt)
+    suggestions = result.scalars().all()
+
+    if not suggestions:
+        return {"message": "No pending suggestions to approve"}
+
+    # Apply suggestions to task
+    changes = {}
+
+    for suggestion in suggestions:
+        if suggestion.suggestion_type == "priority":
+            task.ticktick_priority = suggestion.suggested_value
+            changes["ticktick_priority"] = suggestion.suggested_value
+
+        elif suggestion.suggestion_type == "tags":
+            task.ticktick_tags = suggestion.suggested_value
+            changes["ticktick_tags"] = suggestion.suggested_value
+
+        elif suggestion.suggestion_type == "quadrant":
+            task.eisenhower_quadrant = EisenhowerQuadrant(suggestion.suggested_value)
+            task.is_sorted = True  # Move out of unsorted list
+            changes["eisenhower_quadrant"] = suggestion.suggested_value
+
+        elif suggestion.suggestion_type == "start_date":
+            if suggestion.suggested_value:
+                task.start_date = datetime.fromisoformat(suggestion.suggested_value)
+            else:
+                task.start_date = None
+            changes["start_date"] = task.start_date
+
+        # Mark suggestion as approved
+        suggestion.status = SuggestionStatus.APPROVED
+        suggestion.resolved_at = datetime.utcnow()
+        suggestion.resolved_by_user = True
+
+    # Update sync metadata
+    task.last_modified_at = datetime.utcnow()
+    task.sync_version += 1
+
+    await db.commit()
+    await db.refresh(task)
+
+    # Push changes to TickTick if task is synced
+    synced_to_ticktick = False
+    if task.ticktick_task_id and changes:
+        # Get user for TickTick service
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        if user and user.ticktick_access_token:
+            try:
+                ticktick_service = TickTickService(user=user)
+                await ticktick_service.update_task(task.ticktick_task_id, changes, db)
+                task.last_synced_at = datetime.utcnow()
+                await db.commit()
+                synced_to_ticktick = True
+                logger.info(f"Synced approved suggestions for task {task_id} to TickTick")
+            except Exception as e:
+                logger.error(f"Failed to sync approved suggestions to TickTick: {e}")
+
+    return {
+        "task_id": task_id,
+        "approved_count": len(suggestions),
+        "approved_types": [s.suggestion_type for s in suggestions],
+        "synced_to_ticktick": synced_to_ticktick
+    }
+
+
+@router.post("/{task_id}/suggestions/reject")
+async def reject_suggestions(
+    task_id: int,
+    suggestion_types: List[str] = Body(..., embed=True),
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reject specific suggestions (or all).
+
+    Accepts a list of suggestion types to reject (e.g., ["start_date"])
+    or ["all"] to reject all pending suggestions.
+
+    Rejected suggestions are marked as rejected but not deleted,
+    allowing for tracking of user preferences.
+    """
+    from app.models.task_suggestion import TaskSuggestion, SuggestionStatus
+
+    # Verify task ownership
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Get pending suggestions
+    stmt = select(TaskSuggestion).where(
+        TaskSuggestion.task_id == task_id,
+        TaskSuggestion.status == SuggestionStatus.PENDING
+    )
+
+    if "all" not in suggestion_types:
+        stmt = stmt.where(TaskSuggestion.suggestion_type.in_(suggestion_types))
+
+    result = await db.execute(stmt)
+    suggestions = result.scalars().all()
+
+    if not suggestions:
+        return {"message": "No pending suggestions to reject"}
+
+    # Mark suggestions as rejected
+    for suggestion in suggestions:
+        suggestion.status = SuggestionStatus.REJECTED
+        suggestion.resolved_at = datetime.utcnow()
+        suggestion.resolved_by_user = True
+
+    await db.commit()
+
+    return {
+        "task_id": task_id,
+        "rejected_count": len(suggestions),
+        "rejected_types": [s.suggestion_type for s in suggestions]
+    }
+
+
+class QuickAnalysisRequest(BaseModel):
+    """Request schema for quick task analysis (without creating the task)."""
+    title: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(..., min_length=1)
+    due_date: Optional[datetime] = None
+    user_id: int = Field(..., gt=0)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Review Q4 financial report",
+                "description": "Go through the quarterly financial statements and highlight key metrics",
+                "due_date": "2025-12-20T17:00:00Z",
+                "user_id": 1
+            }
+        }
+
+
+class QuickAnalysisResponse(BaseModel):
+    """Response schema for quick analysis."""
+    urgency_score: Optional[float]
+    importance_score: Optional[float]
+    eisenhower_quadrant: Optional[str]
+    suggested_priority: Optional[int]  # 0/1/3/5 for TickTick
+    analysis_reasoning: Optional[str]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "urgency_score": 7.0,
+                "importance_score": 8.0,
+                "eisenhower_quadrant": "Q1",
+                "suggested_priority": 5,
+                "analysis_reasoning": "This is both urgent and important because..."
+            }
+        }
+
+
+@router.post("/analyze-quick", response_model=QuickAnalysisResponse)
+async def analyze_quick_task(
+    request: QuickAnalysisRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Quickly analyze a task description without creating the task.
+
+    This endpoint is designed for the quick add modal where users
+    want to see AI suggestions before actually creating the task.
+
+    Returns urgency/importance scores, quadrant, and suggested priority.
+    """
+    try:
+        ollama = OllamaService()
+
+        # Check if Ollama is available
+        if not await ollama.health_check():
+            raise HTTPException(
+                status_code=503,
+                detail="LLM service unavailable. Please try again later."
+            )
+
+        # Get user profile context for personalized analysis
+        profile_context = await _get_profile_context(request.user_id, db)
+
+        # Perform LLM analysis
+        analysis = await ollama.analyze_task(
+            request.description,
+            profile_context=profile_context
+        )
+
+        # Map scores to TickTick priority (0/1/3/5)
+        suggested_priority = 0
+        if analysis.urgency >= 7 and analysis.importance >= 7:
+            suggested_priority = 5  # High priority
+        elif analysis.importance >= 7:
+            suggested_priority = 3  # Medium priority
+        elif analysis.urgency >= 7:
+            suggested_priority = 3  # Medium priority
+        elif analysis.urgency >= 5 or analysis.importance >= 5:
+            suggested_priority = 1  # Low priority
+
+        return QuickAnalysisResponse(
+            urgency_score=float(analysis.urgency),
+            importance_score=float(analysis.importance),
+            eisenhower_quadrant=analysis.quadrant,
+            suggested_priority=suggested_priority,
+            analysis_reasoning=analysis.reasoning
+        )
+
+    except Exception as e:
+        logger.error(f"Quick analysis failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
         )

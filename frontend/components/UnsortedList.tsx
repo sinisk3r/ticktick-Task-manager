@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
+import { motion, AnimatePresence } from "framer-motion";
 import { UnsortedTaskCard } from "./UnsortedTaskCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -66,12 +67,19 @@ export function UnsortedList() {
     try {
       const taskIds = tasks.map((t: any) => t.id);
 
-      // Analyze each task individually
-      // TODO: Create batch analyze endpoint for efficiency
-      for (const taskId of taskIds) {
-        await handleAnalyze(taskId);
+      // Use batch analyze endpoint
+      const response = await fetch(`${API_BASE}/api/tasks/analyze/batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_ids: taskIds }),
+      });
+
+      if (!response.ok) {
+        console.error("Batch analysis failed:", await response.text());
+        return;
       }
 
+      // Refresh the unsorted list
       mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`);
     } catch (error) {
       console.error("Batch analysis failed:", error);
@@ -117,14 +125,23 @@ export function UnsortedList() {
 
       <div className="space-y-4">
         {tasks.length > 0 ? (
-          tasks.map((task: any) => (
-            <UnsortedTaskCard
-              key={task.id}
-              task={task}
-              onSort={handleSort}
-              onAnalyze={handleAnalyze}
-            />
-          ))
+          <AnimatePresence mode="popLayout">
+            {tasks.map((task: any) => (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, x: -100, transition: { duration: 0.2 } }}
+              >
+                <UnsortedTaskCard
+                  task={task}
+                  onSort={handleSort}
+                  onAnalyze={handleAnalyze}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         ) : (
           <div className="text-gray-500 text-center py-8 bg-gray-800 rounded-lg border border-gray-700">
             No unsorted tasks. All tasks are organized!

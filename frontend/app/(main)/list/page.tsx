@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import useSWR, { mutate } from "swr"
 import { TaskDetailPopover } from "@/components/TaskDetailPopover"
 import { Input } from "@/components/ui/input"
@@ -305,7 +306,7 @@ export default function ListView() {
             </SelectContent>
           </Select>
 
-          <div className="ml-auto">
+          <div className="ml-auto flex gap-2">
             <Button>
               <Plus className="h-4 w-4 mr-2" />
               Add Task
@@ -330,19 +331,29 @@ export default function ListView() {
               </h2>
 
               <div className="space-y-2">
-                {group.tasks.map((task) => (
-                  <TaskDetailPopover
-                    key={task.id}
-                    task={task}
-                    onUpdate={handleTaskUpdate}
-                    onDelete={handleTaskDelete}
-                    trigger={
-                      <DialogTrigger asChild>
-                        <TaskListItem task={task} />
-                      </DialogTrigger>
-                    }
-                  />
-                ))}
+                <AnimatePresence mode="popLayout">
+                  {group.tasks.map((task) => (
+                    <motion.div
+                      key={task.id}
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <TaskDetailPopover
+                        task={task}
+                        onUpdate={handleTaskUpdate}
+                        onDelete={handleTaskDelete}
+                        trigger={
+                          <DialogTrigger asChild>
+                            <TaskListItem task={task} />
+                          </DialogTrigger>
+                        }
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
             </div>
           ))

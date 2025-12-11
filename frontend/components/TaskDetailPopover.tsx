@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, ReactNode } from "react"
+import useSWR, { mutate } from 'swr'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -10,10 +11,14 @@ import { PrioritySelect } from "@/components/PrioritySelect"
 import { DatePicker } from "@/components/DatePicker"
 import { MetadataRow } from "@/components/MetadataRow"
 import { MarkdownEditor } from "@/components/MarkdownEditor"
+import { SuggestionPanel } from "@/components/SuggestionPanel"
 import { api } from "@/lib/api"
 import { X, Star, Trash2, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Task } from "@/types/task"
+import { Task, SuggestionsResponse } from "@/types/task"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 interface TaskDetailPopoverProps {
   task: Task
@@ -57,10 +62,66 @@ export function TaskDetailPopover({
   const [localTask, setLocalTask] = useState(task)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
 
   // Use controlled state if provided, otherwise use internal state
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = controlledOnOpenChange || setInternalOpen
+
+  // Fetch suggestions
+  const { data: suggestionsData } = useSWR<SuggestionsResponse>(
+    open ? `${API_BASE}/api/tasks/${task.id}/suggestions` : null,
+    fetcher,
+    { refreshInterval: 0 } // Don't auto-refresh
+  )
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true)
+    try {
+      await api.post(`/api/tasks/${task.id}/analyze`)
+      // Refresh suggestions
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+    } catch (error) {
+      console.error('Analysis failed:', error)
+      setError('Failed to analyze task')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleApproveSuggestion = async (types: string[]) => {
+    try {
+      await api.post(`/api/tasks/${task.id}/suggestions/approve`, {
+        suggestion_types: types
+      })
+
+      // Refresh task data and suggestions
+      const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
+      setLocalTask(refreshedTask)
+      if (onUpdate) {
+        onUpdate(refreshedTask)
+      }
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+    } catch (error) {
+      console.error('Approval failed:', error)
+      setError('Failed to approve suggestion')
+    }
+  }
+
+  const handleRejectSuggestion = async (types: string[]) => {
+    try {
+      await api.post(`/api/tasks/${task.id}/suggestions/reject`, {
+        suggestion_types: types
+      })
+
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+    } catch (error) {
+      console.error('Rejection failed:', error)
+      setError('Failed to reject suggestion')
+    }
+  }
+
+  const pendingSuggestions = suggestionsData?.suggestions || []
 
   // Auto-save function
   const saveTask = async (updates: Partial<Task>) => {
@@ -223,14 +284,38 @@ export function TaskDetailPopover({
           />
 
           {/* AI Analysis Section */}
-          {(localTask.urgency_score !== undefined || localTask.analysis_reasoning) && (
-            <div className="border-t pt-4">
-              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <span className="text-lg">🤖</span>
-                AI Analysis
-              </h3>
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <span className="text-lg">🤖</span>
+              AI Analysis
+            </h3>
 
-              <div className="space-y-3 bg-muted/50 p-4 rounded-lg">
+            {/* Show analyze button if no analysis yet and no suggestions */}
+            {!analyzing && pendingSuggestions.length === 0 && !localTask.urgency_score && (
+              <Button onClick={handleAnalyze} variant="outline" className="w-full">
+                ⚡ Analyze with AI
+              </Button>
+            )}
+
+            {/* Show analyzing state */}
+            {analyzing && (
+              <div className="text-center py-4">
+                <p className="text-muted-foreground">🤔 Analyzing task...</p>
+              </div>
+            )}
+
+            {/* Show suggestions if available */}
+            {pendingSuggestions.length > 0 && (
+              <SuggestionPanel
+                suggestions={pendingSuggestions}
+                onApprove={handleApproveSuggestion}
+                onReject={handleRejectSuggestion}
+              />
+            )}
+
+            {/* Show existing analysis */}
+            {(localTask.urgency_score !== undefined || localTask.analysis_reasoning) && (
+              <div className="space-y-3 bg-muted/50 p-4 rounded-lg mt-3">
                 {effectiveQuadrant && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Quadrant:</span>
@@ -262,9 +347,21 @@ export function TaskDetailPopover({
                     <p className="text-sm leading-relaxed">{localTask.analysis_reasoning}</p>
                   </div>
                 )}
+
+                {/* Re-analyze button */}
+                {!analyzing && (
+                  <Button
+                    onClick={handleAnalyze}
+                    variant="ghost"
+                    size="sm"
+                    className="w-full mt-2"
+                  >
+                    🔄 Re-analyze
+                  </Button>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Footer Actions */}
           <div className="flex justify-between items-center pt-4 border-t">
