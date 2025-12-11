@@ -154,6 +154,7 @@ export function TaskDetailPopover({
       await api.post(`/api/tasks/${task.id}/suggestions/approve?user_id=1`, {
         suggestion_types: types
       })
+      setStreamingSuggestions([])
 
       // Refresh task data and suggestions
       const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
@@ -173,6 +174,7 @@ export function TaskDetailPopover({
       await api.post(`/api/tasks/${task.id}/suggestions/reject?user_id=1`, {
         suggestion_types: types
       })
+      setStreamingSuggestions([])
 
       mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
     } catch (error) {

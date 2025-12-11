@@ -9,6 +9,7 @@ from sqlalchemy import select, func, or_, and_, delete
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 import json
+import asyncio
 import logging
 
 # Initialize logger
@@ -1130,6 +1131,7 @@ async def analyze_task_suggestions_stream(
     async def event_generator():
         for suggestion in created_suggestions:
             yield f"event: suggestion\ndata: {json.dumps(suggestion)}\n\n"
+            await asyncio.sleep(0.05)
 
         analysis_payload = suggestion_result.get("analysis", {})
         yield f"event: analysis\ndata: {json.dumps(analysis_payload)}\n\n"
