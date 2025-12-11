@@ -73,7 +73,7 @@ export function TaskDetailPopover({
 
   // Fetch suggestions
   const { data: suggestionsData } = useSWR<SuggestionsResponse>(
-    open ? `${API_BASE}/api/tasks/${task.id}/suggestions` : null,
+    open ? `${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1` : null,
     fetcher,
     { refreshInterval: 0 } // Don't auto-refresh
   )
@@ -81,9 +81,9 @@ export function TaskDetailPopover({
   const handleAnalyze = async () => {
     setAnalyzing(true)
     try {
-      await api.post(`/api/tasks/${task.id}/analyze`)
+      await api.post(`/api/tasks/${task.id}/analyze?user_id=1`)
       // Refresh suggestions
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
     } catch (error) {
       console.error('Analysis failed:', error)
       setError('Failed to analyze task')
@@ -94,7 +94,7 @@ export function TaskDetailPopover({
 
   const handleApproveSuggestion = async (types: string[]) => {
     try {
-      await api.post(`/api/tasks/${task.id}/suggestions/approve`, {
+      await api.post(`/api/tasks/${task.id}/suggestions/approve?user_id=1`, {
         suggestion_types: types
       })
 
@@ -104,7 +104,7 @@ export function TaskDetailPopover({
       if (onUpdate) {
         onUpdate(refreshedTask)
       }
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
     } catch (error) {
       console.error('Approval failed:', error)
       setError('Failed to approve suggestion')
@@ -113,11 +113,11 @@ export function TaskDetailPopover({
 
   const handleRejectSuggestion = async (types: string[]) => {
     try {
-      await api.post(`/api/tasks/${task.id}/suggestions/reject`, {
+      await api.post(`/api/tasks/${task.id}/suggestions/reject?user_id=1`, {
         suggestion_types: types
       })
 
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions`)
+      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
     } catch (error) {
       console.error('Rejection failed:', error)
       setError('Failed to reject suggestion')

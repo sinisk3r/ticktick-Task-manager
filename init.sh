@@ -16,7 +16,7 @@ DEFAULT_FRONTEND_PORT=5401
 # Force mode - automatically kill conflicting processes without prompting
 FORCE_MODE="${FORCE_MODE:-false}"
 # Quiet mode - suppress routine info logs; warnings/errors still print
-QUIET="${QUIET:-false}"
+QUIET="${QUIET:-true}"
 
 log_summary() {
   echo "$@"
