@@ -98,15 +98,15 @@ export function TaskAnalyzer() {
   const getQuadrantColor = (quadrant: string) => {
     switch (quadrant) {
       case "Q1":
-        return "bg-red-900/50 border-red-700"
+        return "bg-red-100 dark:bg-red-900/20 border-red-200 dark:border-red-800"
       case "Q2":
-        return "bg-green-900/50 border-green-700"
+        return "bg-green-100 dark:bg-green-900/20 border-green-200 dark:border-green-800"
       case "Q3":
-        return "bg-yellow-900/50 border-yellow-700"
+        return "bg-yellow-100 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
       case "Q4":
-        return "bg-blue-900/50 border-blue-700"
+        return "bg-blue-100 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
       default:
-        return "bg-gray-800 border-gray-700"
+        return "bg-card border-border"
     }
   }
 
@@ -145,7 +145,7 @@ export function TaskAnalyzer() {
           </Button>
 
           {syncResult && (
-            <Alert className="border-green-700 bg-green-900/50">
+            <Alert className="border-green-200 bg-green-100 dark:border-green-700 dark:bg-green-900/50">
               <CheckCircle2 className="h-4 w-4 text-green-500" />
               <AlertDescription className="text-sm">
                 <p className="font-medium">{syncResult.message}</p>
@@ -206,7 +206,7 @@ export function TaskAnalyzer() {
           </Button>
 
           {error && (
-            <div className="rounded-md bg-red-900/50 border border-red-700 p-4">
+            <div className="rounded-md bg-red-100 border border-red-200 p-4 dark:bg-red-900/50 dark:border-red-700">
               <p className="text-sm text-red-200">{error}</p>
             </div>
           )}
@@ -218,7 +218,7 @@ export function TaskAnalyzer() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>Analysis Results</span>
-              <span className="text-sm font-normal px-3 py-1 rounded-full bg-gray-900/50">
+              <span className="text-sm font-normal px-3 py-1 rounded-full bg-background/50">
                 {result.eisenhower_quadrant}: {getQuadrantLabel(result.eisenhower_quadrant)}
               </span>
             </CardTitle>
@@ -226,20 +226,20 @@ export function TaskAnalyzer() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <div className="text-sm font-medium text-gray-300">Urgency Score</div>
+                <div className="text-sm font-medium text-muted-foreground">Urgency Score</div>
                 <div className="text-3xl font-bold">{result.urgency_score}/10</div>
-                <div className="w-full bg-gray-700 rounded-full h-2">
+                <div className="w-full bg-muted rounded-full h-2">
                   <div
-                    className="bg-blue-500 h-2 rounded-full transition-all"
+                    className="bg-primary h-2 rounded-full transition-all"
                     style={{ width: `${result.urgency_score * 10}%` }}
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="text-sm font-medium text-gray-300">Importance Score</div>
+                <div className="text-sm font-medium text-muted-foreground">Importance Score</div>
                 <div className="text-3xl font-bold">{result.importance_score}/10</div>
-                <div className="w-full bg-gray-700 rounded-full h-2">
+                <div className="w-full bg-muted rounded-full h-2">
                   <div
                     className="bg-green-500 h-2 rounded-full transition-all"
                     style={{ width: `${result.importance_score * 10}%` }}
@@ -249,8 +249,8 @@ export function TaskAnalyzer() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-medium text-gray-300">Reasoning</div>
-              <div className="text-sm text-gray-200 bg-gray-900/50 p-4 rounded-md">
+              <div className="text-sm font-medium text-muted-foreground">Reasoning</div>
+              <div className="text-sm text-foreground bg-background/50 p-4 rounded-md">
                 {result.reasoning}
               </div>
             </div>

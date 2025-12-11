@@ -72,9 +72,9 @@ const QuadrantCard = ({
       <div className="mb-4">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-2xl">{icon}</span>
-          <h3 className="text-lg font-bold text-gray-100">{title}</h3>
+          <h3 className="text-lg font-bold text-foreground">{title}</h3>
         </div>
-        <p className="text-xs text-gray-400">{description}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
         <Badge variant="secondary" className="mt-2">
           {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
         </Badge>
@@ -124,7 +124,7 @@ const TaskPopover = ({
     <Popover>
       <PopoverTrigger asChild>
         <button
-          className="w-full text-left p-3 rounded-lg bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700 transition-colors"
+          className="w-full text-left p-3 rounded-lg bg-background border border-border hover:bg-accent transition-colors"
           draggable
           onDragStart={onDragStart}
           onDragOver={(e) => {
@@ -133,16 +133,16 @@ const TaskPopover = ({
           }}
           onDrop={onDrop}
         >
-          <p className="text-sm font-medium text-gray-200 truncate">
+          <p className="text-sm font-medium text-foreground truncate">
             {task.title}
           </p>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-gray-400">U: {task.urgency_score}</span>
-            <span className="text-xs text-gray-400">I: {task.importance_score}</span>
+            <span className="text-xs text-muted-foreground">U: {task.urgency_score}</span>
+            <span className="text-xs text-muted-foreground">I: {task.importance_score}</span>
           </div>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-96 bg-gray-800 border-gray-700" side="right">
+      <PopoverContent className="w-96 bg-popover border-border" side="right">
         <div className="space-y-3">
           <h4 className="font-semibold text-gray-100 leading-tight">
             {task.title}
@@ -502,8 +502,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
           title="Q1: Do First"
           description="Urgent & Important - Handle immediately"
           tasks={quadrantBuckets.Q1}
-          bgColor="bg-red-900/20"
-          borderColor="border-red-700"
+          bgColor="bg-red-100 dark:bg-red-900/20"
+          borderColor="border-red-200 dark:border-red-700"
           icon="🔴"
           onDrop={handleDrop("Q1")}
           onResetTask={handleReset}
@@ -516,8 +516,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
           title="Q2: Schedule"
           description="Not Urgent, Important - Plan for later"
           tasks={quadrantBuckets.Q2}
-          bgColor="bg-green-900/20"
-          borderColor="border-green-700"
+          bgColor="bg-green-100 dark:bg-green-900/20"
+          borderColor="border-green-200 dark:border-green-700"
           icon="🟢"
           onDrop={handleDrop("Q2")}
           onResetTask={handleReset}
@@ -530,8 +530,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
           title="Q3: Delegate"
           description="Urgent, Not Important - Consider delegating"
           tasks={quadrantBuckets.Q3}
-          bgColor="bg-yellow-900/20"
-          borderColor="border-yellow-700"
+          bgColor="bg-yellow-100 dark:bg-yellow-900/20"
+          borderColor="border-yellow-200 dark:border-yellow-700"
           icon="🟡"
           onDrop={handleDrop("Q3")}
           onResetTask={handleReset}
@@ -544,8 +544,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
           title="Q4: Eliminate"
           description="Neither Urgent nor Important - Minimize time"
           tasks={quadrantBuckets.Q4}
-          bgColor="bg-blue-900/20"
-          borderColor="border-blue-700"
+          bgColor="bg-blue-100 dark:bg-blue-900/20"
+          borderColor="border-blue-200 dark:border-blue-700"
           icon="🔵"
           onDrop={handleDrop("Q4")}
           onResetTask={handleReset}

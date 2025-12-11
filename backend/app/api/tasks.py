@@ -160,7 +160,10 @@ async def create_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new task with automatic LLM analysis.
+    Create a new task and sync to TickTick.
+
+    Tasks are created as unsorted (is_sorted=False) by default.
+    They will appear in the Unsorted list until manually sorted or analyzed.
 
     The task description will be analyzed by the LLM to determine:
     - Urgency score (1-10)
@@ -168,16 +171,21 @@ async def create_task(
     - Eisenhower quadrant (Q1/Q2/Q3/Q4)
     - Analysis reasoning
     """
-    # Create task with basic info
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Create task with basic info (unsorted by default)
     new_task = Task(
         user_id=task_data.user_id,
         title=task_data.title,
         description=task_data.description,
         due_date=task_data.due_date,
-        status=TaskStatus.ACTIVE
+        status=TaskStatus.ACTIVE,
+        is_sorted=False  # Start in unsorted list
     )
 
     # Perform LLM analysis if description is provided
+    # NOTE: Even with analysis, task stays unsorted until user approves
     if task_data.description and task_data.description.strip():
         try:
             ollama = OllamaService()
@@ -187,7 +195,7 @@ async def create_task(
                 profile_context = await _get_profile_context(task_data.user_id, db)
                 analysis = await ollama.analyze_task(task_data.description, profile_context=profile_context)
 
-                # Update task with analysis results
+                # Update task with analysis results (but keep is_sorted=False)
                 new_task.urgency_score = float(analysis.urgency)
                 new_task.importance_score = float(analysis.importance)
                 new_task.eisenhower_quadrant = EisenhowerQuadrant(analysis.quadrant)
@@ -200,11 +208,41 @@ async def create_task(
             # Log error but don't fail task creation
             print(f"[ERROR] LLM analysis failed: {str(e)}")
 
-    # Save to database
+    # Save to database first
     db.add(new_task)
     await db.flush()
     await db.refresh(new_task)
 
+    # Push to TickTick if user is connected
+    user_result = await db.execute(select(User).where(User.id == task_data.user_id))
+    user = user_result.scalar_one_or_none()
+
+    if user and user.ticktick_access_token:
+        try:
+            from app.services.ticktick import TickTickService
+            ticktick_service = TickTickService(user=user)
+
+            # Create task in TickTick
+            ticktick_task = await ticktick_service.create_task({
+                "title": new_task.title,
+                "content": new_task.description or "",
+            }, db)
+
+            # Store TickTick ID for future sync
+            new_task.ticktick_task_id = ticktick_task.get("id")
+            new_task.ticktick_project_id = ticktick_task.get("projectId")
+            new_task.last_synced_at = datetime.utcnow()
+            await db.commit()
+
+            logger.info(f"Created task {new_task.id} and synced to TickTick")
+        except Exception as e:
+            # Log error but don't fail local creation if TickTick sync fails
+            logger.error(f"Failed to sync new task to TickTick: {e}")
+            await db.commit()  # Still commit local task
+    else:
+        await db.commit()
+
+    await db.refresh(new_task)
     return new_task
 
 
@@ -311,6 +349,161 @@ async def reorder_tasks(
     return TaskListResponse(tasks=ordered_tasks, total=len(ordered_tasks))
 
 
+# ============================================================================
+# UNSORTED TASKS ENDPOINTS
+# ============================================================================
+
+
+@router.get("/unsorted", response_model=TaskListResponse)
+async def get_unsorted_tasks(
+    user_id: int = Query(..., gt=0, description="User ID to filter tasks"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all unsorted tasks for current user.
+
+    Unsorted tasks are tasks that have not yet been assigned to a quadrant
+    in the Eisenhower Matrix. These tasks are in a staging area waiting
+    to be manually sorted or analyzed by the AI.
+    """
+    # Query unsorted tasks (is_sorted = False)
+    stmt = select(Task).where(
+        Task.user_id == user_id,
+        Task.is_sorted == False,
+        Task.status != TaskStatus.DELETED
+    ).order_by(Task.created_at.desc())
+
+    result = await db.execute(stmt)
+    tasks = result.scalars().all()
+
+    return TaskListResponse(tasks=tasks, total=len(tasks))
+
+
+class TaskSortRequest(BaseModel):
+    """Request schema for sorting a task."""
+    quadrant: EisenhowerQuadrant = Field(..., description="Target quadrant for the task")
+
+
+@router.post("/{task_id}/sort", response_model=TaskResponse)
+async def sort_task(
+    task_id: int,
+    sort_data: TaskSortRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually sort a task into a quadrant.
+
+    This endpoint:
+    1. Assigns the task to the specified quadrant
+    2. Marks the task as sorted (is_sorted = True)
+    3. Sets manual_quadrant_override to preserve user's choice
+    4. Updates the task in the database
+
+    Note: This does NOT sync to TickTick as TickTick doesn't have quadrant concept.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Fetch task
+    stmt = select(Task).where(Task.id == task_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Sort the task
+    task.eisenhower_quadrant = sort_data.quadrant
+    task.is_sorted = True
+    task.manual_quadrant_override = sort_data.quadrant
+    task.manual_override_reason = "Manually sorted from unsorted list"
+    task.manual_override_source = "user"
+    task.manual_override_at = datetime.utcnow()
+    task.last_modified_at = datetime.utcnow()
+    task.sync_version += 1
+
+    # Set manual_order to end of quadrant
+    max_order_query = select(func.max(Task.manual_order)).where(
+        Task.user_id == task.user_id,
+        Task.id != task.id,
+        _effective_quadrant_expression(sort_data.quadrant),
+    )
+    max_order_result = await db.execute(max_order_query)
+    max_order = max_order_result.scalar()
+    task.manual_order = (max_order or 0) + 1
+
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(f"Task {task_id} sorted to {sort_data.quadrant}")
+
+    return task
+
+
+class BatchSortRequest(BaseModel):
+    """Request schema for batch sorting tasks."""
+    task_ids: List[int] = Field(..., min_length=1, description="List of task IDs to sort")
+    quadrant: EisenhowerQuadrant = Field(..., description="Target quadrant for all tasks")
+
+
+@router.post("/sort/batch", response_model=dict)
+async def batch_sort_tasks(
+    batch_data: BatchSortRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Batch sort multiple tasks into a quadrant.
+
+    Useful for sorting multiple unsorted tasks at once.
+    All tasks will be assigned to the same quadrant.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Fetch tasks
+    stmt = select(Task).where(Task.id.in_(batch_data.task_ids))
+    result = await db.execute(stmt)
+    tasks = result.scalars().all()
+
+    if not tasks:
+        raise HTTPException(status_code=404, detail="No tasks found")
+
+    # Get user_id from first task (assuming all tasks belong to same user)
+    user_id = tasks[0].user_id
+
+    # Get current max order for the quadrant
+    max_order_query = select(func.max(Task.manual_order)).where(
+        Task.user_id == user_id,
+        Task.id.notin_(batch_data.task_ids),
+        _effective_quadrant_expression(batch_data.quadrant),
+    )
+    max_order_result = await db.execute(max_order_query)
+    max_order = max_order_result.scalar() or 0
+
+    # Sort all tasks
+    for idx, task in enumerate(tasks):
+        task.eisenhower_quadrant = batch_data.quadrant
+        task.is_sorted = True
+        task.manual_quadrant_override = batch_data.quadrant
+        task.manual_override_reason = "Batch sorted from unsorted list"
+        task.manual_override_source = "user"
+        task.manual_override_at = datetime.utcnow()
+        task.last_modified_at = datetime.utcnow()
+        task.sync_version += 1
+        task.manual_order = max_order + idx + 1
+
+    await db.commit()
+
+    logger.info(f"Batch sorted {len(tasks)} tasks to {batch_data.quadrant}")
+
+    return {"sorted_count": len(tasks), "quadrant": batch_data.quadrant}
+
+
+# ============================================================================
+# SINGLE TASK OPERATIONS
+# ============================================================================
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: int,
@@ -339,11 +532,15 @@ async def update_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Update a task.
+    Update a task and sync changes to TickTick.
 
     Only fields provided in the request will be updated.
     Returns 404 if task not found.
     """
+    from app.services.ticktick import TickTickService
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Fetch existing task
     result = await db.execute(
         select(Task).where(Task.id == task_id)
@@ -353,17 +550,47 @@ async def update_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    # Update fields that are provided
+    # Track what fields changed for sync
+    changes = {}
     update_data = task_update.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
-        setattr(task, field, value)
+        if hasattr(task, field):
+            old_value = getattr(task, field)
+            if old_value != value:
+                changes[field] = value
+                setattr(task, field, value)
+
+    # Update sync metadata
+    task.last_modified_at = datetime.utcnow()
+    task.sync_version = task.sync_version + 1 if task.sync_version else 1
 
     # Update timestamp
     task.updated_at = datetime.utcnow()
 
-    await db.flush()
+    # Commit local changes first
+    await db.commit()
     await db.refresh(task)
+
+    # Push to TickTick if task is synced from TickTick and we have changes
+    if task.ticktick_task_id and changes:
+        try:
+            # Get user for TickTick service
+            user_result = await db.execute(select(User).where(User.id == task.user_id))
+            user = user_result.scalar_one_or_none()
+
+            if user and user.ticktick_access_token:
+                ticktick_service = TickTickService(user=user)
+                await ticktick_service.update_task(task.ticktick_task_id, changes, db)
+                task.last_synced_at = datetime.utcnow()
+                await db.commit()
+                logger.info(f"Synced task {task_id} changes to TickTick: {list(changes.keys())}")
+            else:
+                logger.warning(f"User {task.user_id} has no TickTick access token, skipping sync")
+        except Exception as e:
+            # Log error but don't block local update
+            logger.error(f"Failed to sync task {task_id} to TickTick: {e}")
+            # Could add a sync_status field to track failures in future
 
     return task
 
@@ -419,6 +646,7 @@ async def update_task_quadrant(
         task.manual_override_reason = quadrant_update.reason or "Manual override"
         task.manual_override_source = quadrant_update.source or "user"
         task.manual_override_at = datetime.utcnow()
+        task.is_sorted = True  # Mark as sorted when quadrant is assigned
 
         # First flush the quadrant change
         await db.flush()
@@ -449,13 +677,17 @@ async def delete_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Delete a task.
+    Delete a task and sync deletion to TickTick.
 
     By default performs soft delete (marks status as deleted).
     Use soft_delete=false for permanent deletion.
 
     Returns 204 No Content on success, 404 if task not found.
     """
+    from app.services.ticktick import TickTickService
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Fetch existing task
     result = await db.execute(
         select(Task).where(Task.id == task_id)
@@ -465,14 +697,37 @@ async def delete_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
+    # Store TickTick info before deletion
+    ticktick_task_id = task.ticktick_task_id
+    ticktick_project_id = task.ticktick_project_id
+    user_id = task.user_id
+
     if soft_delete:
         # Soft delete - mark as deleted
         task.status = TaskStatus.DELETED
         task.updated_at = datetime.utcnow()
-        await db.flush()
+        await db.commit()
     else:
         # Hard delete - remove from database
         await db.delete(task)
+        await db.commit()
+
+    # Push deletion to TickTick if task was synced
+    if ticktick_task_id and ticktick_project_id:
+        try:
+            # Get user for TickTick service
+            user_result = await db.execute(select(User).where(User.id == user_id))
+            user = user_result.scalar_one_or_none()
+
+            if user and user.ticktick_access_token:
+                ticktick_service = TickTickService(user=user)
+                await ticktick_service.delete_task(ticktick_task_id, ticktick_project_id, db)
+                logger.info(f"Deleted task {task_id} from TickTick")
+            else:
+                logger.warning(f"User {user_id} has no TickTick access token, skipping sync")
+        except Exception as e:
+            # Log error but don't block local deletion
+            logger.error(f"Failed to delete task {task_id} from TickTick: {e}")
 
     return None
 
@@ -501,19 +756,24 @@ async def sync_ticktick_tasks(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Sync tasks from TickTick for a user.
+    Sync tasks and projects from TickTick for a user.
 
     This endpoint:
     1. Fetches user's TickTick access token from database
-    2. Calls TickTick API to get all tasks
-    3. For each task, performs LLM analysis
-    4. Saves tasks to database with analysis results
+    2. Syncs projects from TickTick to local database FIRST
+    3. Calls TickTick API to get all tasks with comprehensive metadata
+    4. Links tasks to projects via project_id
+    5. For each task, performs LLM analysis (if description exists)
+    6. Saves tasks to database with analysis results
 
-    Returns count of synced tasks and analysis results.
+    Returns count of synced tasks, projects, and analysis results.
 
     Raises:
         HTTPException: If user not found or TickTick not connected
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Get user from database
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -532,9 +792,26 @@ async def sync_ticktick_tasks(
     analyzed_count = 0
     failed_count = 0
 
+    # STEP 1: Sync projects first
+    from app.services.ticktick import TickTickService
+    ticktick_service_instance = TickTickService(user=user)
+
     try:
-        # Fetch tasks from TickTick
-        ticktick_tasks = await ticktick_service.get_tasks(user.ticktick_access_token)
+        projects = await ticktick_service_instance.sync_projects(db)
+        logger.info(f"Synced {len(projects)} projects for user {user.id}")
+    except Exception as e:
+        logger.error(f"Project sync failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Project sync failed: {str(e)}")
+
+    # Create a mapping of ticktick_project_id → database project_id
+    project_map = {
+        proj.ticktick_project_id: proj.id
+        for proj in projects
+    }
+
+    try:
+        # STEP 2: Fetch tasks from TickTick with full metadata
+        ticktick_tasks = await ticktick_service_instance.get_tasks(user.ticktick_access_token)
 
         # Initialize LLM service
         ollama = OllamaService()
@@ -542,14 +819,22 @@ async def sync_ticktick_tasks(
         profile_context = await _get_profile_context(user_id, db)
 
         # Process each task
-        for tt_task in ticktick_tasks:
+        for task_data in ticktick_tasks:
             try:
-                # Skip completed tasks (status=2 in TickTick)
-                if tt_task.get("status") == 2:
+                # Skip completed tasks
+                if task_data.get("status") == "completed":
                     continue
 
+                # Link task to project via database project_id
+                ticktick_proj_id = task_data.get("ticktick_project_id")
+                task_data["project_id"] = project_map.get(ticktick_proj_id)
+
+                # Set sync metadata
+                task_data["last_synced_at"] = datetime.utcnow()
+                task_data["is_sorted"] = False  # New tasks start unsorted
+
                 # Check if task already exists in database
-                task_id = tt_task.get("id")
+                task_id = task_data.get("ticktick_task_id")
                 existing_task_result = await db.execute(
                     select(Task).where(
                         Task.ticktick_task_id == task_id,
@@ -559,7 +844,7 @@ async def sync_ticktick_tasks(
                 existing_task = existing_task_result.scalar_one_or_none()
 
                 # Prepare task description for analysis
-                task_description = tt_task.get("content") or tt_task.get("title", "")
+                task_description = task_data.get("description") or task_data.get("title", "")
 
                 # Perform LLM analysis if Ollama is available and task has description
                 analysis_result = None
@@ -571,13 +856,13 @@ async def sync_ticktick_tasks(
                         )
                         analyzed_count += 1
                     except Exception as e:
-                        print(f"[ERROR] Analysis failed for task {task_id}: {str(e)}")
+                        logger.warning(f"Analysis failed for task {task_id}: {str(e)}")
 
                 if existing_task:
-                    # Update existing task
-                    existing_task.title = tt_task.get("title", existing_task.title)
-                    existing_task.description = tt_task.get("content")
-                    existing_task.ticktick_project_id = tt_task.get("project_id")
+                    # Update existing task with new data
+                    for key, value in task_data.items():
+                        if hasattr(existing_task, key) and key not in ["id", "user_id", "created_at"]:
+                            setattr(existing_task, key, value)
 
                     # Update analysis if available
                     if analysis_result:
@@ -587,20 +872,18 @@ async def sync_ticktick_tasks(
                         existing_task.analysis_reasoning = analysis_result.reasoning
                         existing_task.analyzed_at = datetime.utcnow()
 
+                    existing_task.sync_version += 1
                     existing_task.updated_at = datetime.utcnow()
 
                 else:
-                    # Create new task
+                    # Create new task (unsorted by default)
                     new_task = Task(
                         user_id=user_id,
-                        title=tt_task.get("title", "Untitled Task"),
-                        description=tt_task.get("content"),
-                        ticktick_task_id=task_id,
-                        ticktick_project_id=tt_task.get("project_id"),
-                        status=TaskStatus.ACTIVE,
+                        **task_data
                     )
 
                     # Add analysis results if available
+                    # NOTE: Even with analysis, task stays unsorted until user approves
                     if analysis_result:
                         new_task.urgency_score = float(analysis_result.urgency)
                         new_task.importance_score = float(analysis_result.importance)
@@ -613,7 +896,7 @@ async def sync_ticktick_tasks(
                 synced_count += 1
 
             except Exception as e:
-                print(f"[ERROR] Failed to sync task {tt_task.get('id', 'unknown')}: {str(e)}")
+                logger.error(f"Failed to sync task {task_data.get('ticktick_task_id', 'unknown')}: {str(e)}")
                 failed_count += 1
                 continue
 
@@ -621,10 +904,11 @@ async def sync_ticktick_tasks(
         await db.commit()
 
         # Prepare response message
+        project_count = len(projects)
         if not ollama_available:
-            message = f"Synced {synced_count} tasks from TickTick (LLM analysis unavailable)"
+            message = f"Synced {project_count} projects and {synced_count} tasks from TickTick (LLM analysis unavailable)"
         else:
-            message = f"Successfully synced {synced_count} tasks from TickTick ({analyzed_count} analyzed)"
+            message = f"Successfully synced {project_count} projects and {synced_count} tasks from TickTick ({analyzed_count} analyzed)"
 
         return SyncResponse(
             synced_count=synced_count,
@@ -634,6 +918,7 @@ async def sync_ticktick_tasks(
         )
 
     except Exception as e:
+        logger.error(f"Failed to sync TickTick tasks: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to sync TickTick tasks: {str(e)}"

@@ -94,7 +94,7 @@ function AuthCallbackContent() {
             <div className="mt-4 text-center">
               <button
                 onClick={() => router.push("/")}
-                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                className="text-sm text-primary hover:underline"
               >
                 Click here if you are not redirected automatically
               </button>

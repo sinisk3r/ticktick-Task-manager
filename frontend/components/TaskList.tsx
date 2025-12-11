@@ -152,8 +152,8 @@ export function TaskList() {
       {/* Header with view toggle and refresh button */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-100">My Tasks</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <h2 className="text-2xl font-bold text-foreground">My Tasks</h2>
+          <p className="text-sm text-muted-foreground mt-1">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""} total
           </p>
         </div>

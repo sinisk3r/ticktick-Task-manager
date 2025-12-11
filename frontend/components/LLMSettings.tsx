@@ -199,18 +199,18 @@ export function LLMSettings() {
       case "disconnected":
         return <XCircle className="h-5 w-5 text-red-500" />
       case "testing":
-        return <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
+        <Loader2 className="h-5 w-5 animate-spin text-primary" />
     }
   }
 
   const getStatusColor = () => {
     switch (connectionStatus) {
       case "connected":
-        return "border-green-700 bg-green-900/50"
+        return "border-green-200 bg-green-100 dark:border-green-700 dark:bg-green-900/50"
       case "disconnected":
-        return "border-red-700 bg-red-900/50"
+        return "border-red-200 bg-red-100 dark:border-red-700 dark:bg-red-900/50"
       case "testing":
-        return "border-blue-700 bg-blue-900/50"
+        return "border-blue-200 bg-blue-100 dark:border-blue-700 dark:bg-blue-900/50"
     }
   }
 
@@ -227,8 +227,8 @@ export function LLMSettings() {
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Backend URL</label>
-              <div className="p-3 bg-gray-900/50 rounded-md border border-gray-700">
-                <code className="text-sm text-gray-300">{backendUrl}</code>
+              <div className="p-3 bg-muted/50 rounded-md border border-border">
+                <code className="text-sm text-foreground">{backendUrl}</code>
               </div>
               <p className="text-xs text-muted-foreground">
                 The backend server handles all LLM communication
@@ -264,7 +264,7 @@ export function LLMSettings() {
             </div>
 
             {saveMessage && (
-              <Alert className="border-green-700 bg-green-900/50">
+              <Alert className="border-green-200 bg-green-100 dark:border-green-700 dark:bg-green-900/50">
                 <CheckCircle2 className="h-4 w-4 text-green-500" />
                 <AlertDescription className="text-green-200">
                   {saveMessage}
@@ -305,15 +305,17 @@ export function LLMSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 bg-gray-900/50 rounded-md border border-gray-700">
+          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-md border border-border">
             <div className="flex items-center gap-3">
-              {ticktickStatus === "checking" ? (
-                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-              ) : ticktickConnected ? (
-                <CheckCircle2 className="h-5 w-5 text-green-500" />
-              ) : (
-                <XCircle className="h-5 w-5 text-gray-500" />
-              )}
+              <div className="p-2 bg-background rounded-full">
+                {ticktickStatus === "checking" ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                ) : ticktickConnected ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                ) : (
+                  <XCircle className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
               <div>
                 <p className="text-sm font-medium">
                   {ticktickConnected ? "Connected to TickTick" : "Not Connected"}
@@ -350,7 +352,7 @@ export function LLMSettings() {
             </div>
           </div>
 
-          <Alert className="border-blue-700 bg-blue-900/20">
+          <Alert className="border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20">
             <Info className="h-4 w-4 text-blue-400" />
             <AlertDescription className="text-sm text-muted-foreground">
               After connecting, you can sync your TickTick tasks from the Analyze tab.
@@ -422,7 +424,7 @@ export function LLMSettings() {
         </CardContent>
       </Card>
 
-      <Card className="border-blue-700 bg-blue-900/20">
+      <Card className="border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Info className="h-5 w-5 text-blue-400" />

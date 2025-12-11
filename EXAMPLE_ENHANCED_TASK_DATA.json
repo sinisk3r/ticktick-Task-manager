@@ -1,0 +1,169 @@
+{
+  "description": "Example of a task object with comprehensive TickTick metadata after Phase 2 implementation",
+  "task_example": {
+    "id": 123,
+    "user_id": 1,
+
+    "// ===== BASIC TASK INFO =====": "",
+    "title": "Complete quarterly report",
+    "description": "Finish Q4 financial report with analysis and recommendations for next quarter",
+    "status": "active",
+
+    "// ===== TICKTICK INTEGRATION =====": "",
+    "ticktick_task_id": "64a3c2f1e4b0123456789abc",
+    "ticktick_project_id": "64a3c2f1e4b0987654321xyz",
+    "project_id": 5,
+    "project_name": "Work Projects",
+
+    "// ===== PRIORITY & SCHEDULING =====": "",
+    "ticktick_priority": 3,
+    "_ticktick_priority_note": "0=None, 1=Low, 3=Medium, 5=High",
+    "due_date": "2025-12-20T17:00:00+00:00",
+    "start_date": "2025-12-15T09:00:00+00:00",
+    "all_day": false,
+
+    "// ===== REMINDERS & RECURRENCE =====": "",
+    "reminder_time": "2025-12-20T16:00:00+00:00",
+    "repeat_flag": null,
+    "_repeat_flag_example": "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR",
+
+    "// ===== ORGANIZATION =====": "",
+    "parent_task_id": null,
+    "sort_order": 1,
+    "column_id": "column_todo",
+    "_column_id_note": "Kanban column identifier",
+
+    "// ===== TAGS & TIME TRACKING =====": "",
+    "ticktick_tags": ["work", "important", "finance", "q4"],
+    "time_estimate": 100,
+    "_time_estimate_note": "Minutes (calculated from Pomodoro: 4 pomodoros × 25 min)",
+    "focus_time": 45,
+    "_focus_time_note": "Actual minutes spent (from focus summaries)",
+
+    "// ===== LLM ANALYSIS (from Ollama) =====": "",
+    "urgency_score": 8.0,
+    "importance_score": 7.5,
+    "effort_hours": null,
+    "eisenhower_quadrant": "Q1",
+    "analysis_reasoning": "High urgency due to Friday deadline. Important for quarterly business goals and strategic planning.",
+    "blockers": null,
+    "tags": null,
+
+    "// ===== MANUAL OVERRIDES =====": "",
+    "manual_priority_override": null,
+    "manual_quadrant_override": null,
+    "manual_override_reason": null,
+    "manual_override_source": null,
+    "manual_override_at": null,
+    "manual_order": null,
+
+    "// ===== SORTING & SYNC STATUS =====": "",
+    "is_sorted": false,
+    "_is_sorted_note": "Tasks from TickTick start in Unsorted list until user assigns quadrant",
+    "last_synced_at": "2025-12-11T15:30:00+00:00",
+    "last_modified_at": "2025-12-11T15:30:00+00:00",
+    "sync_version": 1,
+
+    "// ===== TIMESTAMPS =====": "",
+    "created_at": "2025-12-11T10:00:00+00:00",
+    "updated_at": "2025-12-11T15:30:00+00:00",
+    "analyzed_at": "2025-12-11T15:30:05+00:00",
+
+    "// ===== CALENDAR INTEGRATION (future) =====": "",
+    "calendar_event_id": null,
+    "scheduled_start": null,
+    "scheduled_end": null
+  },
+
+  "metadata_categories": {
+    "basic_info": [
+      "title",
+      "description",
+      "status"
+    ],
+    "ticktick_sync": [
+      "ticktick_task_id",
+      "ticktick_project_id",
+      "project_id",
+      "project_name"
+    ],
+    "scheduling": [
+      "ticktick_priority",
+      "due_date",
+      "start_date",
+      "all_day",
+      "reminder_time",
+      "repeat_flag"
+    ],
+    "organization": [
+      "parent_task_id",
+      "sort_order",
+      "column_id"
+    ],
+    "tags_and_time": [
+      "ticktick_tags",
+      "time_estimate",
+      "focus_time"
+    ],
+    "ai_analysis": [
+      "urgency_score",
+      "importance_score",
+      "eisenhower_quadrant",
+      "analysis_reasoning"
+    ],
+    "user_overrides": [
+      "manual_quadrant_override",
+      "manual_override_reason",
+      "manual_order"
+    ],
+    "sync_tracking": [
+      "is_sorted",
+      "last_synced_at",
+      "sync_version"
+    ]
+  },
+
+  "frontend_display_suggestions": {
+    "task_card_header": {
+      "elements": [
+        "title",
+        "ticktick_priority (as badge)",
+        "project_name (as chip)"
+      ]
+    },
+    "task_card_body": {
+      "elements": [
+        "description (truncated)",
+        "ticktick_tags (as chips)",
+        "time_estimate (with clock icon)",
+        "focus_time (with timer icon)"
+      ]
+    },
+    "task_card_footer": {
+      "elements": [
+        "due_date (formatted, with urgency indicator)",
+        "eisenhower_quadrant (as badge)",
+        "parent_task_id (show 'Subtask' badge if present)"
+      ]
+    },
+    "task_detail_view": {
+      "sections": [
+        "All basic info",
+        "Scheduling (due_date, start_date, all_day)",
+        "Reminders (reminder_time, repeat_flag)",
+        "Organization (parent_task, column)",
+        "Time tracking (estimate vs actual)",
+        "AI Analysis (scores, quadrant, reasoning)",
+        "Sync status"
+      ]
+    }
+  },
+
+  "api_endpoints_to_use": {
+    "sync_from_ticktick": "POST /api/tasks/sync?user_id=1",
+    "get_unsorted_tasks": "GET /api/tasks/unsorted?user_id=1",
+    "get_tasks_by_quadrant": "GET /api/tasks?user_id=1&quadrant=Q1",
+    "get_projects": "GET /api/projects?user_id=1",
+    "sync_projects": "POST /api/projects/sync?user_id=1"
+  }
+}

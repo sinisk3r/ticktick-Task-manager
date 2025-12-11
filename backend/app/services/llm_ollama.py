@@ -1,6 +1,8 @@
 import os
 import json
 import httpx
+from pathlib import Path
+from typing import Optional, List
 from pydantic import BaseModel
 
 
@@ -10,6 +12,14 @@ class TaskAnalysis(BaseModel):
     importance: int  # 1-10
     quadrant: str  # Q1, Q2, Q3, Q4
     reasoning: str
+
+
+def load_prompt_template(version: str = "v1") -> str:
+    """Load versioned prompt template from file"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / f"task_analysis_suggestions_{version}.txt"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+    return prompt_path.read_text()
 
 
 class OllamaService:
@@ -163,3 +173,109 @@ Return strictly valid JSON in this shape:
             return "Q3"  # Delegate
         else:
             return "Q4"  # Eliminate
+
+    async def generate_suggestions(
+        self,
+        task_data: dict,
+        project_context: Optional[dict] = None,
+        related_tasks: Optional[List[dict]] = None,
+        user_workload: Optional[dict] = None
+    ) -> dict:
+        """
+        Generate AI suggestions for a task (not direct changes).
+
+        Args:
+            task_data: Task details (title, description, due_date, current priority, etc.)
+            project_context: Project info (name, other tasks in project)
+            related_tasks: Similar or related tasks for context
+            user_workload: User's current task load and capacity
+
+        Returns:
+            dict with "analysis" and "suggestions" keys
+        """
+        # Load prompt template
+        prompt_template = load_prompt_template("v1")
+
+        # Build context JSON
+        task_context = {
+            "title": task_data.get("title"),
+            "description": task_data.get("description", ""),
+            "due_date": task_data.get("due_date").isoformat() if task_data.get("due_date") else None,
+            "ticktick_priority": task_data.get("ticktick_priority", 0),
+            "project_name": project_context.get("name") if project_context else None,
+            "ticktick_tags": task_data.get("ticktick_tags", []),
+            "start_date": task_data.get("start_date").isoformat() if task_data.get("start_date") else None,
+            "related_tasks_in_project": related_tasks or [],
+            "user_workload": user_workload or {}
+        }
+
+        # Substitute into prompt
+        final_prompt = prompt_template.replace("{task_json}", json.dumps(task_context, indent=2))
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Use chat API endpoint for better control
+            system_message = (
+                "You are a task analysis assistant that generates suggestions for task organization. "
+                "Respond ONLY with valid JSON in the exact format requested. "
+                "Do NOT echo back the input data."
+            )
+
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": final_prompt}
+                ],
+                "format": "json",
+                "stream": False,
+                # Disable Qwen3 thinking mode so JSON lands in 'content', not 'thinking'
+                "think": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 1500,
+                }
+            }
+            print(f"[DEBUG] Generating suggestions with Ollama: {self.base_url}/api/chat")
+            print(f"[DEBUG] Model: {self.model}")
+
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json=payload
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            print(f"[DEBUG] Raw response keys: {result.keys()}")
+
+            # Extract the message content from chat response
+            message = result.get("message", {})
+            llm_text = message.get("content", "") or message.get("thinking", "")
+
+            # Final check for empty response
+            if not llm_text or llm_text.strip() == "":
+                raise ValueError(
+                    "Received empty response from Ollama. "
+                    "This may be due to model loading or a timeout. Try again."
+                )
+
+            print(f"[DEBUG] LLM response (first 500 chars): {llm_text[:500]}")
+
+            try:
+                suggestion_data = json.loads(llm_text)
+            except json.JSONDecodeError:
+                # Try to extract JSON from the response if it has extra text
+                import re
+                json_match = re.search(r'\{.*"analysis".*\}', llm_text, re.DOTALL)
+                if json_match:
+                    suggestion_data = json.loads(json_match.group())
+                else:
+                    raise ValueError(f"Could not parse LLM response as JSON: {llm_text[:500]}")
+
+            # Validate structure
+            if "analysis" not in suggestion_data or "suggestions" not in suggestion_data:
+                raise ValueError(
+                    f"Invalid suggestion format. Expected 'analysis' and 'suggestions' keys. "
+                    f"Got: {list(suggestion_data.keys())}"
+                )
+
+            return suggestion_data

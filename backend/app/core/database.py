@@ -54,7 +54,7 @@ async def init_db():
     """Initialize database tables (for development only)."""
     async with engine.begin() as conn:
         # Import all models here to ensure they're registered
-        from app.models import task, user, settings as settings_model  # noqa
+        from app.models import task, user, project, task_suggestion, settings as settings_model  # noqa
 
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)

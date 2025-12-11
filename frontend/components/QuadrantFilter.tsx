@@ -39,7 +39,7 @@ export function QuadrantFilter({
 
           <TabsTrigger value="Q1" className="flex flex-col py-3 gap-1">
             <span className="text-sm font-medium">🔴 Q1</span>
-            <span className="text-xs text-gray-400">Urgent & Important</span>
+            <span className="text-xs text-muted-foreground">Urgent & Important</span>
             <Badge variant="destructive" className="text-xs">
               {taskCounts.Q1}
             </Badge>
@@ -47,16 +47,16 @@ export function QuadrantFilter({
 
           <TabsTrigger value="Q2" className="flex flex-col py-3 gap-1">
             <span className="text-sm font-medium">🟢 Q2</span>
-            <span className="text-xs text-gray-400">Not Urgent, Important</span>
-            <Badge variant="default" className="text-xs bg-green-700">
+            <span className="text-xs text-muted-foreground">Not Urgent, Important</span>
+            <Badge variant="default" className="text-xs bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900 dark:text-green-100 dark:hover:bg-green-800">
               {taskCounts.Q2}
             </Badge>
           </TabsTrigger>
 
           <TabsTrigger value="Q3" className="flex flex-col py-3 gap-1">
             <span className="text-sm font-medium">🟡 Q3</span>
-            <span className="text-xs text-gray-400">Urgent, Not Important</span>
-            <Badge variant="secondary" className="text-xs bg-yellow-700">
+            <span className="text-xs text-muted-foreground">Urgent, Not Important</span>
+            <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800 hover:bg-yellow-200 dark:bg-yellow-900 dark:text-yellow-100 dark:hover:bg-yellow-800">
               {taskCounts.Q3}
             </Badge>
           </TabsTrigger>

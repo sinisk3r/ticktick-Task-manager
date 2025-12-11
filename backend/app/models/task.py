@@ -1,7 +1,7 @@
 """
 Task model with LLM analysis results and Eisenhower matrix classification.
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, ForeignKey, Enum as SQLEnum, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -34,6 +34,7 @@ class Task(Base):
 
     # Foreign Keys
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
 
     # TickTick Integration
     ticktick_task_id = Column(String(255), unique=True, nullable=True, index=True)
@@ -62,10 +63,36 @@ class Task(Base):
     manual_override_at = Column(DateTime(timezone=True), nullable=True)
     manual_order = Column(Integer, nullable=True, index=True)  # per-quadrant manual ordering
 
+    # Sorting Status
+    is_sorted = Column(Boolean, default=False, nullable=False, index=True)  # False = Unsorted, True = In Matrix
+
     # Calendar Integration (future iteration)
     calendar_event_id = Column(String(255), nullable=True)
     scheduled_start = Column(DateTime(timezone=True), nullable=True)
     scheduled_end = Column(DateTime(timezone=True), nullable=True)
+
+    # TickTick Extended Metadata
+    ticktick_priority = Column(Integer, nullable=True)  # 0=None, 1=Low, 3=Medium, 5=High
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    all_day = Column(Boolean, default=False, nullable=False)
+    reminder_time = Column(DateTime(timezone=True), nullable=True)
+    repeat_flag = Column(String(255), nullable=True)
+
+    # Organization
+    project_name = Column(String(500), nullable=True)
+    parent_task_id = Column(String(255), nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    column_id = Column(String(255), nullable=True)
+
+    # Additional Metadata
+    ticktick_tags = Column(JSONB, nullable=True)  # JSON array of tags
+    time_estimate = Column(Integer, nullable=True)  # minutes
+    focus_time = Column(Integer, nullable=True)  # minutes
+
+    # Sync Tracking
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    last_modified_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    sync_version = Column(Integer, default=1, nullable=False)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -74,6 +101,8 @@ class Task(Base):
 
     # Relationships
     user = relationship("User", back_populates="tasks")
+    project = relationship("Project", back_populates="tasks")
+    suggestions = relationship("TaskSuggestion", back_populates="task", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Task(id={self.id}, title='{self.title[:30]}...', quadrant={self.eisenhower_quadrant})>"
