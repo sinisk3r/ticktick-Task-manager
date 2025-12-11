@@ -2,14 +2,15 @@
 
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Image from "next/image";
 
 interface TopBarProps {
     onMenuClick: () => void;
     title?: string;
+    onChatToggle?: () => void;
+    chatOpen?: boolean;
 }
 
-export function TopBar({ onMenuClick, title }: TopBarProps) {
+export function TopBar({ onMenuClick, title, onChatToggle, chatOpen }: TopBarProps) {
     return (
         <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur px-6 shadow-sm">
             <Button
@@ -28,7 +29,16 @@ export function TopBar({ onMenuClick, title }: TopBarProps) {
             </div>
 
             <div className="ml-auto flex items-center gap-4">
-                {/* Actions like notifications can go here */}
+                {onChatToggle ? (
+                    <Button
+                        variant={chatOpen ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={onChatToggle}
+                        className="hidden md:inline-flex"
+                    >
+                        {chatOpen ? "Hide Assistant" : "Open Assistant"}
+                    </Button>
+                ) : null}
             </div>
         </header>
     );

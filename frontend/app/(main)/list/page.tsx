@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, memo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import useSWR, { mutate } from "swr"
 import { TaskDetailPopover } from "@/components/TaskDetailPopover"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -362,36 +361,62 @@ export default function ListView() {
   )
 }
 
-function TaskListItem({ task }: { task: Task }) {
-  const getQuadrant = (task: Task) =>
-    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
+// Memoized checkbox checkmark SVG component
+const CheckIcon = memo(() => (
+  <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+  </svg>
+))
+CheckIcon.displayName = "CheckIcon"
 
-  const getPriorityLabel = (priority: number) => {
-    const labels: { [key: number]: string } = {
-      0: "None",
-      1: "Low",
-      3: "Medium",
-      5: "High",
+// Priority labels lookup (moved outside component to avoid recreation)
+const PRIORITY_LABELS: { [key: number]: string } = {
+  0: "None",
+  1: "Low",
+  3: "Medium",
+  5: "High",
+}
+
+const TaskListItem = memo(function TaskListItem({ task }: { task: Task }) {
+  // Pre-compute values with useMemo to avoid recalculation
+  const quadrant = useMemo(
+    () => task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant,
+    [task.manual_quadrant_override, task.effective_quadrant, task.eisenhower_quadrant]
+  )
+
+  const priorityLabel = useMemo(
+    () => PRIORITY_LABELS[task.ticktick_priority || 0] || "None",
+    [task.ticktick_priority]
+  )
+
+  const { isOverdue: taskIsOverdue, formattedDate } = useMemo(() => {
+    if (!task.due_date) {
+      return { isOverdue: false, formattedDate: null }
     }
-    return labels[priority] || "None"
-  }
+    const date = new Date(task.due_date)
+    const overdue = isPast(date) && !isToday(date)
+    let formatted: string | null = null
+    if (isToday(date)) {
+      formatted = "Today"
+    } else if (isThisWeek(date)) {
+      formatted = format(date, "EEE")
+    } else {
+      formatted = format(date, "MMM d")
+    }
+    return { isOverdue: overdue, formattedDate: formatted }
+  }, [task.due_date])
 
-  const isOverdue = (dueDate: string | null | undefined) => {
-    if (!dueDate) return false
-    return isPast(new Date(dueDate)) && !isToday(new Date(dueDate))
-  }
-
-  const formatDueDate = (dueDate: string | null | undefined) => {
-    if (!dueDate) return null
-    const date = new Date(dueDate)
-    if (isToday(date)) return "Today"
-    if (isThisWeek(date)) return format(date, "EEE")
-    return format(date, "MMM d")
-  }
+  const isCompleted = task.status === "completed"
+  const checkboxClassName = isCompleted
+    ? "size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow flex items-center justify-center bg-primary text-primary-foreground border-primary"
+    : "size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow flex items-center justify-center border-input dark:bg-input/30"
 
   return (
-    <button className="group w-full flex items-center gap-3 p-4 bg-card rounded-lg border hover:border-primary cursor-pointer transition-all text-left">
-      <Checkbox checked={task.status === "completed"} className="pointer-events-none" />
+    <div className="group w-full flex items-center gap-3 p-4 bg-card rounded-lg border hover:border-primary cursor-pointer transition-all text-left">
+      {/* Visual checkbox indicator (non-interactive) */}
+      <div className={checkboxClassName} aria-hidden="true">
+        {isCompleted && <CheckIcon />}
+      </div>
 
       <div className="flex-1 min-w-0">
         <div className="font-medium truncate">{task.title}</div>
@@ -403,20 +428,17 @@ function TaskListItem({ task }: { task: Task }) {
           )}
           {(task.ticktick_priority || 0) > 0 && (
             <Badge variant="secondary" className="text-xs">
-              {getPriorityLabel(task.ticktick_priority || 0)}
+              {priorityLabel}
             </Badge>
           )}
-          {task.due_date && (
-            <Badge
-              variant={isOverdue(task.due_date) ? "destructive" : "default"}
-              className="text-xs"
-            >
-              {formatDueDate(task.due_date)}
+          {formattedDate && (
+            <Badge variant={taskIsOverdue ? "destructive" : "default"} className="text-xs">
+              {formattedDate}
             </Badge>
           )}
-          {getQuadrant(task) && (
+          {quadrant && (
             <Badge variant="outline" className="text-xs">
-              {getQuadrant(task)}
+              {quadrant}
             </Badge>
           )}
           {task.ticktick_tags?.map((tag) => (
@@ -428,10 +450,10 @@ function TaskListItem({ task }: { task: Task }) {
       </div>
 
       <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-        <Button variant="ghost" size="icon" className="h-8 w-8">
+        <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={(e) => e.stopPropagation()}>
           <Star className="h-4 w-4" />
         </Button>
       </div>
-    </button>
+    </div>
   )
-}
+})

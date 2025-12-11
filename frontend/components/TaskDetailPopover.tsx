@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, ReactNode, useEffect } from "react"
+import { useState, useCallback, ReactNode } from "react"
 import useSWR, { mutate } from 'swr'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,7 @@ import { SuggestionPanel } from "@/components/SuggestionPanel"
 import { api } from "@/lib/api"
 import { X, Trash2, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Task, SuggestionsResponse, Suggestion } from "@/types/task"
+import { Task, SuggestionsResponse } from "@/types/task"
 import { ProjectSelector } from "@/components/metadata/ProjectSelector"
 import { TagsInput } from "@/components/metadata/TagsInput"
 import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
@@ -67,19 +67,10 @@ export function TaskDetailPopover({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
-  const [streamingSuggestions, setStreamingSuggestions] = useState<Suggestion[]>([])
 
   // Use controlled state if provided, otherwise use internal state
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = controlledOnOpenChange || setInternalOpen
-
-  // Reset streaming state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setStreamingSuggestions([])
-      setAnalyzing(false)
-    }
-  }, [open])
 
   // Fetch suggestions
   const { data: suggestionsData } = useSWR<SuggestionsResponse>(
@@ -91,62 +82,23 @@ export function TaskDetailPopover({
   const handleAnalyze = () => {
     setAnalyzing(true)
     setError(null)
-    setStreamingSuggestions([])
 
-    try {
-      const source = new EventSource(`${API_BASE}/api/tasks/${task.id}/analyze/stream?user_id=1`)
-
-      source.addEventListener("suggestion", (event: MessageEvent) => {
-        try {
-          const payload = JSON.parse(event.data)
-          setStreamingSuggestions((prev) => [...prev, payload])
-        } catch (e) {
-          console.error("Failed to parse suggestion event", e)
+    api.post(`/api/tasks/${task.id}/analyze?user_id=1`)
+      .then(async () => {
+        await mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
+        const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
+        setLocalTask(refreshedTask)
+        if (onUpdate) {
+          onUpdate(refreshedTask)
         }
       })
-
-      source.addEventListener("analysis", (event: MessageEvent) => {
-        try {
-          const payload = JSON.parse(event.data)
-          setLocalTask((prev) => ({
-            ...prev,
-            urgency_score: payload?.urgency_score ?? prev.urgency_score,
-            importance_score: payload?.importance_score ?? prev.importance_score,
-            eisenhower_quadrant: payload?.eisenhower_quadrant ?? prev.eisenhower_quadrant,
-            analysis_reasoning: payload?.analysis_reasoning ?? prev.analysis_reasoning,
-          }))
-        } catch (e) {
-          console.error("Failed to parse analysis event", e)
-        }
-      })
-
-      source.addEventListener("done", async () => {
-        source.close()
-        try {
-          const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
-          setLocalTask(refreshedTask)
-          if (onUpdate) {
-            onUpdate(refreshedTask)
-          }
-          mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
-        } catch (e) {
-          console.error("Failed to refresh after streaming", e)
-        } finally {
-          setAnalyzing(false)
-        }
-      })
-
-      source.onerror = (err) => {
-        console.error("Streaming analyze failed:", err)
+      .catch((error) => {
+        console.error("Analysis failed:", error)
         setError("Failed to analyze task")
-        source.close()
+      })
+      .finally(() => {
         setAnalyzing(false)
-      }
-    } catch (error) {
-      console.error("Analysis failed:", error)
-      setError("Failed to analyze task")
-      setAnalyzing(false)
-    }
+      })
   }
 
   const handleApproveSuggestion = async (types: string[]) => {
@@ -154,7 +106,6 @@ export function TaskDetailPopover({
       await api.post(`/api/tasks/${task.id}/suggestions/approve?user_id=1`, {
         suggestion_types: types
       })
-      setStreamingSuggestions([])
 
       // Refresh task data and suggestions
       const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
@@ -174,7 +125,6 @@ export function TaskDetailPopover({
       await api.post(`/api/tasks/${task.id}/suggestions/reject?user_id=1`, {
         suggestion_types: types
       })
-      setStreamingSuggestions([])
 
       mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
     } catch (error) {
@@ -183,8 +133,7 @@ export function TaskDetailPopover({
     }
   }
 
-  const storedSuggestions = suggestionsData?.suggestions || []
-  const displayedSuggestions = streamingSuggestions.length > 0 ? streamingSuggestions : storedSuggestions
+  const displayedSuggestions = suggestionsData?.suggestions || []
 
   // Auto-save function
   const saveTask = async (updates: Partial<Task>) => {
@@ -233,7 +182,7 @@ export function TaskDetailPopover({
 
     try {
       setSaving(true)
-      await api.delete(`/api/tasks/${task.id}?user_id=1`)
+      await api.delete(`/api/tasks/${task.id}`)
       setOpen(false)
       if (onDelete) {
         onDelete(task.id)
@@ -260,6 +209,7 @@ export function TaskDetailPopover({
     <Dialog open={open} onOpenChange={setOpen}>
       {trigger}
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogTitle className="sr-only">{localTask.title || "Task details"}</DialogTitle>
         {/* Header */}
         <DialogHeader>
           <div className="flex items-start gap-3">
@@ -384,11 +334,13 @@ export function TaskDetailPopover({
               AI Analysis
             </h3>
 
-            {/* Show analyze button if no analysis yet and no suggestions */}
-            {!analyzing && displayedSuggestions.length === 0 && !localTask.urgency_score && (
-              <Button onClick={handleAnalyze} variant="outline" className="w-full">
-                ⚡ Analyze with AI
-              </Button>
+            {/* Analyze buttons */}
+            {!analyzing && (
+              <div className="grid grid-cols-1 gap-2">
+                <Button onClick={handleAnalyze} variant="secondary" className="w-full" type="button">
+                  ⚡ Analyze
+                </Button>
+              </div>
             )}
 
             {/* Show analyzing state */}
@@ -408,7 +360,7 @@ export function TaskDetailPopover({
             )}
 
             {/* Show existing analysis */}
-            {(localTask.urgency_score !== undefined || localTask.analysis_reasoning) && (
+            {localTask.urgency_score !== undefined && localTask.importance_score !== undefined && (
               <div className="space-y-3 bg-muted/50 p-4 rounded-lg mt-3">
                 {effectiveQuadrant && (
                   <div className="flex items-center gap-2">

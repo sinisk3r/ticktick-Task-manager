@@ -2,7 +2,9 @@
 
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
+import { ChatPanel } from "@/components/ChatPanel";
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 
 export default function MainLayout({
     children,
@@ -11,6 +13,8 @@ export default function MainLayout({
 }) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobile, setIsMobile] = useState(false);
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const pathname = usePathname();
 
     useEffect(() => {
         const checkMobile = () => {
@@ -18,8 +22,10 @@ export default function MainLayout({
             setIsMobile(isSmall);
             if (isSmall) {
                 setIsSidebarOpen(false);
+                setIsChatOpen(false);
             } else {
                 setIsSidebarOpen(true);
+                setIsChatOpen(true);
             }
         };
 
@@ -37,13 +43,32 @@ export default function MainLayout({
             />
 
             <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out relative">
-                <TopBar onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)} />
+                <TopBar
+                    onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    onChatToggle={() => setIsChatOpen(!isChatOpen)}
+                    chatOpen={isChatOpen}
+                />
 
-                <main className="flex-1 overflow-y-auto p-6 md:p-8">
-                    <div className="mx-auto max-w-5xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        {children}
+                <div className="flex flex-1 overflow-hidden">
+                    <main className="flex-1 overflow-y-auto p-6 md:p-8">
+                        <div className="mx-auto max-w-5xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {children}
+                        </div>
+                    </main>
+
+                    <div
+                        className={`relative h-full transition-all duration-200 ${
+                            isChatOpen ? (isMobile ? "w-full" : "w-[360px]") : "w-0"
+                        }`}
+                    >
+                        <ChatPanel
+                            isOpen={isChatOpen}
+                            onClose={() => setIsChatOpen(false)}
+                            isMobile={isMobile}
+                            context={{ pathname }}
+                        />
                     </div>
-                </main>
+                </div>
             </div>
         </div>
     );
