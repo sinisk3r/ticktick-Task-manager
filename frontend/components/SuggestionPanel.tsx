@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { formatMinutes } from '@/components/metadata/time'
 
 interface Suggestion {
   id: number
@@ -58,6 +59,14 @@ export function SuggestionPanel({ suggestions, onApprove, onReject }: Suggestion
         return value
       case 'start_date':
         return value ? new Date(value).toLocaleDateString() : 'Not set'
+      case 'project':
+        return value?.name || value || 'Not set'
+      case 'time_estimate':
+        return formatMinutes(typeof value === 'number' ? value : Number(value))
+      case 'repeat':
+        return value || 'Not set'
+      case 'reminder_time':
+        return value ? new Date(value).toLocaleString() : 'Not set'
       default:
         return JSON.stringify(value)
     }

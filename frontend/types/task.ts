@@ -5,9 +5,16 @@ export interface Task {
   status: string
   due_date?: string | null
   start_date?: string | null
+  reminder_time?: string | null
+  repeat_flag?: string | null
+  all_day?: boolean
   ticktick_priority?: number
+  project_id?: number | null
   project_name?: string
+  ticktick_project_id?: string
   ticktick_tags?: string[]
+  time_estimate?: number | null
+  focus_time?: number | null
   urgency_score?: number
   importance_score?: number
   eisenhower_quadrant?: string
@@ -18,6 +25,8 @@ export interface Task {
   manual_order?: number
   analysis_reasoning?: string
   created_at?: string
+  updated_at?: string
+  analyzed_at?: string
   ticktick_task_id?: string
 }
 

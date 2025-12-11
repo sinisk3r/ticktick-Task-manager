@@ -10,9 +10,28 @@ FRONTEND_PID="$PID_DIR/frontend.pid"
 BACKEND_LOG="$ROOT_DIR/backend/uvicorn.log"
 FRONTEND_LOG="$ROOT_DIR/frontend/next-dev.log"
 DOCKER_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+DEFAULT_BACKEND_PORT=5400
+DEFAULT_FRONTEND_PORT=5401
 
 # Force mode - automatically kill conflicting processes without prompting
 FORCE_MODE="${FORCE_MODE:-false}"
+# Quiet mode - suppress routine info logs; warnings/errors still print
+QUIET="${QUIET:-false}"
+
+log_summary() {
+  echo "$@"
+}
+
+log_info() {
+  if [[ "$QUIET" == "true" ]]; then
+    return
+  fi
+  echo "$@"
+}
+
+log_warn() {
+  echo "$@"
+}
 
 # Port configuration file
 PORT_CONFIG_FILE="$ROOT_DIR/.ports.json"
@@ -28,8 +47,8 @@ load_port_config() {
     # Create default config
     cat > "$PORT_CONFIG_FILE" <<EOF
 {
-  "backend": 8000,
-  "frontend": 3000,
+  "backend": 5400,
+  "frontend": 5401,
   "postgres": 5432,
   "redis": 6379
 }
@@ -100,7 +119,7 @@ FRONTEND_URL=http://localhost:$frontend_port
 NEXT_PUBLIC_API_URL=http://localhost:$backend_port
 EOF
 
-  echo "[init] Updated runtime environment: $ENV_FILE"
+  log_info "[init] Updated runtime environment: $ENV_FILE"
 }
 
 is_running() {
@@ -127,6 +146,33 @@ get_port_owner() {
   lsof -Pi :"$port" -sTCP:LISTEN -t 2>/dev/null | head -n1
 }
 
+is_owned_process() {
+  local pid="$1"
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+
+  # Try to determine cwd of the process
+  local cwd
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+  if [[ -z "$cwd" ]]; then
+    cwd=$(lsof -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p' | grep -m1 "^$ROOT_DIR")
+  fi
+
+  if [[ -n "$cwd" && "$cwd" == "$ROOT_DIR"* ]]; then
+    return 0
+  fi
+
+  # Fallback to command line inspection
+  local cmdline
+  cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$cmdline" == *"$ROOT_DIR"* ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 kill_port_owner() {
   local port="$1"
   local name="$2"
@@ -134,38 +180,42 @@ kill_port_owner() {
   pid=$(get_port_owner "$port")
 
   if [[ -n "$pid" ]]; then
-    echo "[init] Port $port is occupied by process $pid"
+    log_info "[init] Port $port is occupied by process $pid"
 
-    # If the process looks like one of ours (uvicorn/next under ROOT_DIR), kill without prompting
-    local cmdline
+    local cmdline owned_by_project
     cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    if [[ "$cmdline" == *"$ROOT_DIR/backend/venv/bin/uvicorn"* ]] || [[ "$cmdline" == *"app.main:app"* ]] || [[ "$cmdline" == *"$ROOT_DIR/frontend"* && "$cmdline" == *"next"* ]]; then
-      echo "[init] Detected owned process for $name (cmd: $cmdline); killing without prompt to avoid duplicates..."
+    owned_by_project=false
+    if is_owned_process "$pid" || [[ "$cmdline" == *"$ROOT_DIR/backend/venv/bin/uvicorn"* ]] || [[ "$cmdline" == *"app.main:app"* ]] || [[ "$cmdline" == *"$ROOT_DIR/frontend"* && "$cmdline" == *"next"* ]]; then
+      owned_by_project=true
+    fi
+
+    if [[ "$owned_by_project" == "true" ]]; then
+      log_info "[init] Detected owned process for $name (cmd: $cmdline); killing without prompt to avoid duplicates..."
       kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
       sleep 2
       if check_port "$port"; then
-        echo "[init] ERROR: Failed to free port $port"
+        log_warn "[init] ERROR: Failed to free port $port"
         return 1
       fi
-      echo "[init] Port $port freed successfully"
+      log_info "[init] Port $port freed successfully"
       return 0
     fi
 
-    # In force mode or non-interactive mode, automatically kill
+    # In force mode or non-interactive mode, automatically kill unknown owners
     if [[ "$FORCE_MODE" == "true" ]] || [[ ! -t 0 ]]; then
-      echo "[init] Automatically killing process $pid (force mode or non-interactive)..."
+      log_warn "[init] Automatically killing process $pid (force mode or non-interactive)..."
       kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
       sleep 2
       if check_port "$port"; then
-        echo "[init] ERROR: Failed to free port $port"
+        log_warn "[init] ERROR: Failed to free port $port"
         return 1
       fi
-      echo "[init] Port $port freed successfully"
+      log_info "[init] Port $port freed successfully"
       return 0
     fi
 
     # Interactive mode - avoid killing unknown processes; fail fast
-    echo "[init] Aborting $name start - port $port is used by an external process (pid $pid, cmd: $cmdline). Use FORCE_MODE=true if you want auto-kill."
+    log_warn "[init] Aborting $name start - port $port is used by an external process (pid $pid, cmd: $cmdline). Use FORCE_MODE=true if you want auto-kill."
     return 1
   fi
   return 0
@@ -178,17 +228,17 @@ wait_for_service() {
   local max_wait=10
   local count=0
 
-  echo "[init] Waiting for $name to start on port $port..."
+  log_info "[init] Waiting for $name to start on port $port..."
   while [[ $count -lt $max_wait ]]; do
     if check_port "$port"; then
-      echo "[init] $name is ready on port $port"
+      log_info "[init] $name is ready on port $port"
       return 0
     fi
 
     # Check if process died
     if ! is_running "$pid"; then
-      echo "[init] ERROR: $name process died during startup"
-      echo "[init] Check logs for details"
+      log_warn "[init] ERROR: $name process died during startup"
+      log_warn "[init] Check logs for details"
       return 1
     fi
 
@@ -196,19 +246,19 @@ wait_for_service() {
     ((count++))
   done
 
-  echo "[init] WARNING: $name didn't respond on port $port within ${max_wait}s"
-  echo "[init] Process is running but may have issues - check logs"
+  log_warn "[init] WARNING: $name didn't respond on port $port within ${max_wait}s"
+  log_warn "[init] Process is running but may have issues - check logs"
   return 1
 }
 
 start_docker() {
-  echo "[init] Starting docker-compose services..."
+  log_info "[init] Starting docker-compose services..."
   if ! command -v docker >/dev/null 2>&1; then
-    echo "[init] docker is not available. Please install/start Docker Desktop."
+    log_warn "[init] docker is not available. Please install/start Docker Desktop."
     exit 1
   fi
   if ! docker info >/dev/null 2>&1; then
-    echo "[init] Docker daemon is not running. Start Docker Desktop first."
+    log_warn "[init] Docker daemon is not running. Start Docker Desktop first."
     exit 1
   fi
 
@@ -235,26 +285,26 @@ start_docker() {
 
   if check_port "$postgres_port"; then
     if is_our_docker_container "$postgres_port" "context_postgres"; then
-      echo "[init] PostgreSQL container already running on port $postgres_port (this is normal)"
+      log_info "[init] PostgreSQL container already running on port $postgres_port (this is normal)"
     else
       local postgres_owner
       postgres_owner=$(get_port_owner "$postgres_port")
-      echo "[init] WARNING: Port $postgres_port (PostgreSQL) is already in use by process $postgres_owner (not the project container)"
-      echo "[init] Docker may fail to start PostgreSQL; continuing without prompts."
+      log_warn "[init] WARNING: Port $postgres_port (PostgreSQL) is already in use by process $postgres_owner (not the project container)"
+      log_warn "[init] Docker may fail to start PostgreSQL; continuing without prompts."
     fi
   fi
 
   if check_port "$redis_port"; then
     if is_our_docker_container "$redis_port" "context_redis"; then
-      echo "[init] Redis container already running on port $redis_port (this is normal)"
+      log_info "[init] Redis container already running on port $redis_port (this is normal)"
     else
       local redis_owner
       redis_owner=$(get_port_owner "$redis_port")
-      echo "[init] WARNING: Port $redis_port (Redis) is already in use by process $redis_owner"
-      echo "[init] Docker may fail to start Redis. Consider stopping the conflicting process."
+      log_warn "[init] WARNING: Port $redis_port (Redis) is already in use by process $redis_owner"
+      log_warn "[init] Docker may fail to start Redis. Consider stopping the conflicting process."
 
       if [[ "$FORCE_MODE" == "true" ]] || [[ ! -t 0 ]]; then
-        echo "[init] Continuing in force/non-interactive mode..."
+        log_warn "[init] Continuing in force/non-interactive mode..."
       else
         read -p "[init] Continue anyway? [y/N] " -n 1 -r
         echo
@@ -265,29 +315,37 @@ start_docker() {
     fi
   fi
 
-  docker compose -f "$DOCKER_COMPOSE_FILE" up -d
+  if [[ "$QUIET" == "true" ]]; then
+    docker compose -f "$DOCKER_COMPOSE_FILE" up -d >/dev/null 2>&1
+  else
+    docker compose -f "$DOCKER_COMPOSE_FILE" up -d
+  fi
 
   # Wait for services to be ready
-  echo "[init] Waiting for Docker services to be ready..."
+  log_info "[init] Waiting for Docker services to be ready..."
   local max_wait=30
   local count=0
 
   while [[ $count -lt $max_wait ]]; do
     if check_port "$postgres_port" && check_port "$redis_port"; then
-      echo "[init] Docker services are ready"
+      log_info "[init] Docker services are ready"
       return 0
     fi
     sleep 1
     ((count++))
   done
 
-  echo "[init] WARNING: Docker services didn't start within ${max_wait}s"
-  echo "[init] Check 'docker compose logs' for details"
+  log_warn "[init] WARNING: Docker services didn't start within ${max_wait}s"
+  log_warn "[init] Check 'docker compose logs' for details"
 }
 
 stop_docker() {
-  echo "[init] Stopping docker-compose services..."
-  docker compose -f "$DOCKER_COMPOSE_FILE" down
+  log_info "[init] Stopping docker-compose services..."
+  if [[ "$QUIET" == "true" ]]; then
+    docker compose -f "$DOCKER_COMPOSE_FILE" down >/dev/null 2>&1
+  else
+    docker compose -f "$DOCKER_COMPOSE_FILE" down
+  fi
 }
 
 start_backend() {
@@ -296,59 +354,69 @@ start_backend() {
 
   local backend_port
   backend_port=$(get_configured_port "backend")
+  if [[ -z "$backend_port" ]]; then
+    backend_port=$DEFAULT_BACKEND_PORT
+  fi
+
+  # If config drifted but default is free, snap back to default
+  if [[ "$backend_port" != "$DEFAULT_BACKEND_PORT" ]] && ! check_port "$DEFAULT_BACKEND_PORT"; then
+    backend_port=$DEFAULT_BACKEND_PORT
+    set_configured_port "backend" "$backend_port"
+    log_info "[init] Backend port reset to default $backend_port"
+  fi
 
   # If backend is already running, stop it first to avoid duplicates
   if [[ -f "$BACKEND_PID" ]]; then
     local existing_backend_pid
     existing_backend_pid=$(cat "$BACKEND_PID")
     if is_running "$existing_backend_pid"; then
-      echo "[init] Backend already running (pid $existing_backend_pid) - stopping to avoid duplicates"
+      log_info "[init] Backend already running (pid $existing_backend_pid) - stopping to avoid duplicates"
       stop_service "backend" "$BACKEND_PID"
     else
-      echo "[init] Backend pid file exists but process not running (cleaning stale pid file)."
+      log_info "[init] Backend pid file exists but process not running (cleaning stale pid file)."
       rm -f "$BACKEND_PID"
     fi
   fi
 
   # Check if configured port is already in use
   if check_port "$backend_port"; then
-    echo "[init] Port $backend_port is occupied"
+    log_info "[init] Port $backend_port is occupied"
 
     # Try to kill the owner or find a new port
     if kill_port_owner "$backend_port" "backend"; then
-      echo "[init] Port $backend_port freed, proceeding with backend startup"
+      log_info "[init] Port $backend_port freed, proceeding with backend startup"
     else
-      echo "[init] Finding alternative port for backend..."
+      log_warn "[init] Finding alternative port for backend..."
       local new_port
       new_port=$(find_available_port $((backend_port + 1)))
 
       if [[ -z "$new_port" ]]; then
-        echo "[init] Cannot start backend - no available ports"
+        log_warn "[init] Cannot start backend - no available ports"
         exit 1
       fi
 
       backend_port=$new_port
       set_configured_port "backend" "$backend_port"
-      echo "[init] Backend will use port $backend_port"
+      log_warn "[init] Backend will use port $backend_port"
     fi
   fi
 
   local uvicorn_bin="$ROOT_DIR/backend/venv/bin/uvicorn"
   if [[ ! -x "$uvicorn_bin" ]]; then
-    echo "[init] Backend venv not found or uvicorn missing at $uvicorn_bin"
-    echo "[init] Create venv and install deps first."
+    log_warn "[init] Backend venv not found or uvicorn missing at $uvicorn_bin"
+    log_warn "[init] Create venv and install deps first."
     exit 1
   fi
 
-  echo "[init] Starting backend (uvicorn) on port $backend_port..."
+  log_info "[init] Starting backend (uvicorn) on port $backend_port..."
   (cd "$ROOT_DIR/backend" && "$uvicorn_bin" app.main:app --reload --port "$backend_port" >"$BACKEND_LOG" 2>&1 & echo $! >"$BACKEND_PID")
 
   local backend_pid
   backend_pid=$(cat "$BACKEND_PID")
 
   if ! wait_for_service "backend" "$backend_port" "$backend_pid"; then
-    echo "[init] Backend startup verification failed"
-    echo "[init] Last 20 lines of backend log:"
+    log_warn "[init] Backend startup verification failed"
+    log_warn "[init] Last 20 lines of backend log:"
     tail -n 20 "$BACKEND_LOG"
     # Clean up pid file if service failed
     if ! is_running "$backend_pid"; then
@@ -360,8 +428,8 @@ start_backend() {
   # Update runtime environment file
   update_runtime_env
 
-  echo "[init] Backend started successfully (pid $backend_pid) on port $backend_port"
-  echo "[init] Logs: $BACKEND_LOG"
+  log_summary "[init] Started backend on port $backend_port (pid $backend_pid)"
+  log_info "[init] Logs: $BACKEND_LOG"
 }
 
 start_frontend() {
@@ -370,49 +438,59 @@ start_frontend() {
 
   local frontend_port
   frontend_port=$(get_configured_port "frontend")
+  if [[ -z "$frontend_port" ]]; then
+    frontend_port=$DEFAULT_FRONTEND_PORT
+  fi
+
+  # If config drifted but default is free, snap back to default
+  if [[ "$frontend_port" != "$DEFAULT_FRONTEND_PORT" ]] && ! check_port "$DEFAULT_FRONTEND_PORT"; then
+    frontend_port=$DEFAULT_FRONTEND_PORT
+    set_configured_port "frontend" "$frontend_port"
+    log_info "[init] Frontend port reset to default $frontend_port"
+  fi
 
   # If frontend is already running, stop it first to avoid duplicates
   if [[ -f "$FRONTEND_PID" ]]; then
     local existing_frontend_pid
     existing_frontend_pid=$(cat "$FRONTEND_PID")
     if is_running "$existing_frontend_pid"; then
-      echo "[init] Frontend already running (pid $existing_frontend_pid) - stopping to avoid duplicates"
+      log_info "[init] Frontend already running (pid $existing_frontend_pid) - stopping to avoid duplicates"
       stop_service "frontend" "$FRONTEND_PID"
     else
-      echo "[init] Frontend pid file exists but process not running (cleaning stale pid file)."
+      log_info "[init] Frontend pid file exists but process not running (cleaning stale pid file)."
       rm -f "$FRONTEND_PID"
     fi
   fi
 
   # Check if configured port is already in use
   if check_port "$frontend_port"; then
-    echo "[init] Port $frontend_port is occupied"
+    log_info "[init] Port $frontend_port is occupied"
 
     # Try to kill the owner or find a new port
     if kill_port_owner "$frontend_port" "frontend"; then
-      echo "[init] Port $frontend_port freed, proceeding with frontend startup"
+      log_info "[init] Port $frontend_port freed, proceeding with frontend startup"
     else
-      echo "[init] Finding alternative port for frontend..."
+      log_warn "[init] Finding alternative port for frontend..."
       local new_port
       new_port=$(find_available_port $((frontend_port + 1)))
 
       if [[ -z "$new_port" ]]; then
-        echo "[init] Cannot start frontend - no available ports"
+        log_warn "[init] Cannot start frontend - no available ports"
         exit 1
       fi
 
       frontend_port=$new_port
       set_configured_port "frontend" "$frontend_port"
-      echo "[init] Frontend will use port $frontend_port"
+      log_warn "[init] Frontend will use port $frontend_port"
     fi
   fi
 
   if ! command -v npm >/dev/null 2>&1; then
-    echo "[init] npm is not available. Install Node/npm first."
+    log_warn "[init] npm is not available. Install Node/npm first."
     exit 1
   fi
 
-  echo "[init] Starting frontend (Next.js dev server) on port $frontend_port..."
+  log_info "[init] Starting frontend (Next.js dev server) on port $frontend_port..."
 
   # Update runtime env before starting so frontend can read it
   update_runtime_env
@@ -427,24 +505,24 @@ start_frontend() {
   frontend_pid=$(cat "$FRONTEND_PID")
 
   if ! wait_for_service "frontend" "$frontend_port" "$frontend_pid"; then
-    echo "[init] Frontend startup verification failed"
+    log_warn "[init] Frontend startup verification failed"
 
     # Check if Next.js auto-switched to a different port
     local detected_port
     detected_port=$(lsof -Pan -p "$frontend_pid" -i 2>/dev/null | grep LISTEN | awk '{print $9}' | cut -d: -f2 | head -n1)
 
     if [[ -n "$detected_port" && "$detected_port" != "$frontend_port" ]]; then
-      echo "[init] WARNING: Next.js started on port $detected_port instead of $frontend_port"
-      echo "[init] This usually means port $frontend_port had issues (lock file, permission, etc.)"
-      echo "[init] Updating configuration to use port $detected_port"
+      log_warn "[init] WARNING: Next.js started on port $detected_port instead of $frontend_port"
+      log_warn "[init] This usually means port $frontend_port had issues (lock file, permission, etc.)"
+      log_warn "[init] Updating configuration to use port $detected_port"
 
       frontend_port=$detected_port
       set_configured_port "frontend" "$frontend_port"
       update_runtime_env
 
-      echo "[init] Frontend is now configured for port $frontend_port"
+      log_warn "[init] Frontend is now configured for port $frontend_port"
     else
-      echo "[init] Last 20 lines of frontend log:"
+      log_warn "[init] Last 20 lines of frontend log:"
       tail -n 20 "$FRONTEND_LOG"
       # Clean up pid file if service failed
       if ! is_running "$frontend_pid"; then
@@ -454,9 +532,9 @@ start_frontend() {
     fi
   fi
 
-  echo "[init] Frontend started successfully (pid $frontend_pid) on port $frontend_port"
-  echo "[init] Logs: $FRONTEND_LOG"
-  echo "[init] Access frontend at: http://localhost:$frontend_port"
+  log_summary "[init] Started frontend on port $frontend_port (pid $frontend_pid)"
+  log_info "[init] Logs: $FRONTEND_LOG"
+  log_info "[init] Access frontend at: http://localhost:$frontend_port"
 }
 
 stop_service() {
@@ -464,14 +542,14 @@ stop_service() {
   local pid_file="$2"
 
   if [[ ! -f "$pid_file" ]]; then
-    echo "[init] $name not running (no pid file)."
+    log_info "[init] $name not running (no pid file)."
     return
   fi
 
   local pid
   pid="$(cat "$pid_file")"
   if is_running "$pid"; then
-    echo "[init] Stopping $name (pid $pid)..."
+    log_info "[init] Stopping $name (pid $pid)..."
     kill "$pid" >/dev/null 2>&1 || true
 
     # Wait for graceful shutdown
@@ -483,14 +561,18 @@ stop_service() {
 
     # Force kill if still running
     if is_running "$pid"; then
-      echo "[init] $name didn't stop gracefully, forcing kill..."
+      log_warn "[init] $name didn't stop gracefully, forcing kill..."
       kill -9 "$pid" >/dev/null 2>&1 || true
       sleep 1
     fi
 
-    echo "[init] $name stopped."
+    if [[ "$name" == "backend" || "$name" == "frontend" ]]; then
+      log_summary "[init] Stopped $name (pid $pid)"
+    else
+      log_info "[init] $name stopped."
+    fi
   else
-    echo "[init] $name pid file exists but process not running (cleaning up stale pid file)."
+    log_info "[init] $name pid file exists but process not running (cleaning up stale pid file)."
   fi
   rm -f "$pid_file"
 }
@@ -650,6 +732,7 @@ status   Check status of all services and ports
 
 Environment Variables:
   FORCE_MODE=true    Automatically kill conflicting processes without prompting
+  QUIET=true         Suppress routine info logs (warnings/errors still show)
 
 Examples:
   ./init.sh start                # start all services (interactive)
@@ -659,8 +742,8 @@ Examples:
   ./init.sh status                # check status of all services
 
 Ports Used:
-  3000 - Frontend (Next.js)
-  8000 - Backend (FastAPI/Uvicorn)
+  5401 - Frontend (Next.js)
+  5400 - Backend (FastAPI/Uvicorn)
   5432 - PostgreSQL (Docker)
   6379 - Redis (Docker)
 EOF

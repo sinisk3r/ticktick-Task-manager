@@ -6,6 +6,7 @@ import { TaskDetailPopover } from "./TaskDetailPopover";
 import { DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { API_BASE } from "@/lib/api";
 
 interface UnsortedTaskCardProps {
   task: any;
@@ -29,7 +30,7 @@ export function UnsortedTaskCard({
     setAnalyzing(true);
     try {
       // Call the analyze API endpoint
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/tasks/${task.id}/analyze`, {
+      const response = await fetch(`${API_BASE}/api/tasks/${task.id}/analyze`, {
         method: 'POST',
       });
 

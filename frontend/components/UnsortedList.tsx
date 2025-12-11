@@ -4,8 +4,7 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { motion, AnimatePresence } from "framer-motion";
 import { UnsortedTaskCard } from "./UnsortedTaskCard";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 

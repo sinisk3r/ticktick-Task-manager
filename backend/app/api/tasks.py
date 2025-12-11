@@ -29,6 +29,16 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
     due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None
+    ticktick_priority: Optional[int] = Field(0, description="TickTick priority (0/1/3/5)")
+    ticktick_tags: Optional[List[str]] = Field(default_factory=list)
+    project_id: Optional[int] = Field(None, description="Local project id")
+    project_name: Optional[str] = Field(None, description="Project display name")
+    ticktick_project_id: Optional[str] = Field(None, description="TickTick project id")
+    all_day: Optional[bool] = False
+    reminder_time: Optional[datetime] = None
+    repeat_flag: Optional[str] = None
+    time_estimate: Optional[int] = Field(None, description="Estimated minutes")
     user_id: int = Field(..., gt=0)  # For now, passed in request (will be from auth later)
 
     class Config:
@@ -37,6 +47,16 @@ class TaskCreate(BaseModel):
                 "title": "Finish quarterly report",
                 "description": "Complete Q4 financial report and submit to management",
                 "due_date": "2025-12-15T17:00:00Z",
+                "start_date": "2025-12-12T09:00:00Z",
+                "ticktick_priority": 3,
+                "ticktick_tags": ["finance", "reporting"],
+                "project_id": 2,
+                "project_name": "Finance",
+                "ticktick_project_id": "abc123",
+                "all_day": False,
+                "reminder_time": "2025-12-15T09:00:00Z",
+                "repeat_flag": "RRULE:FREQ=MONTHLY",
+                "time_estimate": 120,
                 "user_id": 1
             }
         }
@@ -47,6 +67,16 @@ class TaskUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     description: Optional[str] = None
     due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None
+    ticktick_priority: Optional[int] = Field(None, description="TickTick priority (0/1/3/5)")
+    ticktick_tags: Optional[List[str]] = None
+    project_id: Optional[int] = Field(None, description="Local project id")
+    project_name: Optional[str] = None
+    ticktick_project_id: Optional[str] = None
+    all_day: Optional[bool] = None
+    reminder_time: Optional[datetime] = None
+    repeat_flag: Optional[str] = None
+    time_estimate: Optional[int] = Field(None, description="Estimated minutes")
     status: Optional[TaskStatus] = None
     manual_quadrant_override: Optional[EisenhowerQuadrant] = None
 
@@ -55,7 +85,16 @@ class TaskUpdate(BaseModel):
             "example": {
                 "title": "Updated task title",
                 "status": "completed",
-                "manual_quadrant_override": "Q1"
+                "manual_quadrant_override": "Q1",
+                "ticktick_priority": 5,
+                "ticktick_tags": ["urgent", "finance"],
+                "project_id": 2,
+                "project_name": "Finance",
+                "ticktick_project_id": "abc123",
+                "start_date": "2025-12-12T09:00:00Z",
+                "reminder_time": "2025-12-15T09:00:00Z",
+                "repeat_flag": "RRULE:FREQ=MONTHLY",
+                "time_estimate": 90
             }
         }
 
@@ -91,6 +130,18 @@ class TaskResponse(BaseModel):
     description: Optional[str]
     status: TaskStatus
     due_date: Optional[datetime]
+    start_date: Optional[datetime]
+    ticktick_priority: Optional[int]
+    ticktick_tags: Optional[List[str]]
+    project_id: Optional[int]
+    project_name: Optional[str]
+    ticktick_project_id: Optional[str]
+    ticktick_task_id: Optional[str]
+    all_day: bool
+    reminder_time: Optional[datetime]
+    repeat_flag: Optional[str]
+    time_estimate: Optional[int]
+    focus_time: Optional[int]
     urgency_score: Optional[float]
     importance_score: Optional[float]
     effort_hours: Optional[float]
@@ -183,6 +234,16 @@ async def create_task(
         title=task_data.title,
         description=task_data.description,
         due_date=task_data.due_date,
+        start_date=task_data.start_date,
+        ticktick_priority=task_data.ticktick_priority,
+        ticktick_tags=task_data.ticktick_tags or [],
+        project_id=task_data.project_id,
+        project_name=task_data.project_name,
+        ticktick_project_id=task_data.ticktick_project_id,
+        all_day=task_data.all_day or False,
+        reminder_time=task_data.reminder_time,
+        repeat_flag=task_data.repeat_flag,
+        time_estimate=task_data.time_estimate,
         status=TaskStatus.ACTIVE,
         is_sorted=False  # Start in unsorted list
     )
@@ -896,7 +957,11 @@ async def analyze_task_suggestions(
         "ticktick_priority": task.ticktick_priority,
         "project_name": task.project_name,
         "ticktick_tags": task.ticktick_tags or [],
-        "start_date": task.start_date
+        "start_date": task.start_date,
+        "repeat_flag": task.repeat_flag,
+        "reminder_time": task.reminder_time,
+        "time_estimate": task.time_estimate,
+        "all_day": task.all_day,
     }
 
     try:
@@ -1108,6 +1173,44 @@ async def approve_suggestions(
             else:
                 task.start_date = None
             changes["start_date"] = task.start_date
+
+        elif suggestion.suggestion_type == "project":
+            suggested = suggestion.suggested_value
+            if isinstance(suggested, dict):
+                task.project_id = suggested.get("id")
+                task.project_name = suggested.get("name") or suggested.get("label")
+                task.ticktick_project_id = suggested.get("ticktick_project_id")
+            else:
+                task.project_name = suggested
+            changes["project_id"] = task.project_id
+            changes["project_name"] = task.project_name
+            changes["ticktick_project_id"] = task.ticktick_project_id
+
+        elif suggestion.suggestion_type == "time_estimate":
+            if suggestion.suggested_value is None:
+                task.time_estimate = None
+            else:
+                try:
+                    task.time_estimate = int(suggestion.suggested_value)
+                except (TypeError, ValueError):
+                    task.time_estimate = None
+            changes["time_estimate"] = task.time_estimate
+
+        elif suggestion.suggestion_type == "repeat":
+            task.repeat_flag = suggestion.suggested_value
+            changes["repeat_flag"] = suggestion.suggested_value
+
+        elif suggestion.suggestion_type == "reminder_time":
+            if suggestion.suggested_value:
+                cleaned = suggestion.suggested_value.replace("Z", "+00:00")
+                task.reminder_time = datetime.fromisoformat(cleaned)
+            else:
+                task.reminder_time = None
+            changes["reminder_time"] = task.reminder_time
+
+        elif suggestion.suggestion_type == "subtasks":
+            # Placeholder: we don't persist subtasks yet, but record approval
+            changes["subtasks"] = suggestion.suggested_value
 
         # Mark suggestion as approved
         suggestion.status = SuggestionStatus.APPROVED

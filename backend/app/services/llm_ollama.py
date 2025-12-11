@@ -205,6 +205,10 @@ Return strictly valid JSON in this shape:
             "project_name": project_context.get("name") if project_context else None,
             "ticktick_tags": task_data.get("ticktick_tags", []),
             "start_date": task_data.get("start_date").isoformat() if task_data.get("start_date") else None,
+            "repeat_flag": task_data.get("repeat_flag"),
+            "reminder_time": task_data.get("reminder_time").isoformat() if task_data.get("reminder_time") else None,
+            "time_estimate": task_data.get("time_estimate"),
+            "all_day": task_data.get("all_day", False),
             "related_tasks_in_project": related_tasks or [],
             "user_workload": user_workload or {}
         }

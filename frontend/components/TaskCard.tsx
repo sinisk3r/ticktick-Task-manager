@@ -9,6 +9,9 @@ import { TaskDetailPopover } from "@/components/TaskDetailPopover"
 import { DialogTrigger } from "@/components/ui/dialog"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import { Task } from "@/types/task"
+import { RepeatBadge } from "@/components/metadata/RepeatBadge"
+import { TimeEstimateBadge } from "@/components/metadata/TimeEstimateBadge"
+import { formatMinutes } from "@/components/metadata/time"
 
 interface TaskCardProps {
   task: Task
@@ -70,6 +73,19 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
       ? task.analysis_reasoning.substring(0, 120) + "..."
       : task.analysis_reasoning
     : "No AI analysis available"
+
+  const priorityLabel = (priority?: number) => {
+    if (priority === 5) return "High"
+    if (priority === 3) return "Medium"
+    if (priority === 1) return "Low"
+    return null
+  }
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return ""
+    const date = new Date(value)
+    return date.toLocaleDateString()
+  }
 
   return (
     <TaskDetailPopover
@@ -169,18 +185,63 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
               <span className="text-xs text-gray-500">
                 {task.created_at ? new Date(task.created_at).toLocaleDateString() : ""}
               </span>
-              {manualOverride && (
-                <span className="text-[10px] text-gray-400">
-                  {task.manual_override_at
-                    ? `Updated ${new Date(task.manual_override_at).toLocaleDateString()}`
-                    : "Manual"}
-                </span>
-              )}
-              {task.ticktick_task_id && (
+              <div className="flex flex-wrap gap-1 justify-end">
+                {manualOverride && (
+                  <Badge variant="outline" className="text-[10px]">
+                    {task.manual_override_at
+                      ? `Updated ${new Date(task.manual_override_at).toLocaleDateString()}`
+                      : "Manual"}
+                  </Badge>
+                )}
+                {task.ticktick_task_id && (
+                  <Badge variant="outline" className="text-xs">
+                    TickTick
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* Metadata badges */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {task.project_name && (
                 <Badge variant="outline" className="text-xs">
-                  TickTick
+                  🗂️ {task.project_name}
                 </Badge>
               )}
+              {priorityLabel(task.ticktick_priority) && (
+                <Badge variant="secondary" className="text-xs">
+                  ⭐ {priorityLabel(task.ticktick_priority)}
+                </Badge>
+              )}
+              {task.due_date && (
+                <Badge variant="outline" className="text-xs">
+                  📅 Due {formatDate(task.due_date)}
+                </Badge>
+              )}
+              {task.start_date && (
+                <Badge variant="outline" className="text-xs">
+                  🏁 Start {formatDate(task.start_date)}
+                </Badge>
+              )}
+              {task.reminder_time && (
+                <Badge variant="outline" className="text-xs">
+                  🔔 {formatDate(task.reminder_time)}
+                </Badge>
+              )}
+              {task.repeat_flag && <RepeatBadge pattern={task.repeat_flag} />}
+              {typeof task.time_estimate === "number" && (
+                <TimeEstimateBadge minutes={task.time_estimate} />
+              )}
+              {task.ticktick_tags?.map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-xs">
+                  #{tag}
+                </Badge>
+              ))}
+              {task.focus_time ? (
+                <Badge variant="outline" className="text-xs">
+                  🎯 {formatMinutes(task.focus_time)}
+                </Badge>
+              ) : null}
             </div>
           </Card>
         </DialogTrigger>

@@ -13,12 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Search, Plus, AlertCircle, Star, Trash2 } from "lucide-react"
 import { DialogTrigger } from "@/components/ui/dialog"
-import { api } from "@/lib/api"
+import { api, API_BASE } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { format, isToday, isThisWeek, isPast } from "date-fns"
 import { Task, TasksResponse } from "@/types/task"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 export default function ListView() {

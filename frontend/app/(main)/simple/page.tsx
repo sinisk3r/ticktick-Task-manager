@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { mutate } from "swr";
 import { UnsortedList } from "@/components/UnsortedList";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api";
 
 export default function SimpleTaskView() {
   const [title, setTitle] = useState("");

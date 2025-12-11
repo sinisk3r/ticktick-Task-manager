@@ -4,8 +4,8 @@ Your job is to analyze a task and generate SUGGESTIONS (not direct changes) for 
 
 ## Input Context
 You will receive:
-- Task details (title, description, due_date)
-- TickTick metadata (current priority, project, tags, dates)
+- Task details (title, description, due_date, start_date)
+- TickTick metadata (priority, project, tags, repeat_flag, reminder_time, time_estimate)
 - Project context (related tasks in the same project)
 - User workload (total tasks, current capacity)
 
@@ -21,7 +21,7 @@ Generate a JSON object with this structure:
   },
   "suggestions": [
     {
-      "type": "priority"|"tags"|"quadrant"|"start_date",
+      "type": "priority"|"tags"|"quadrant"|"start_date"|"project"|"time_estimate"|"repeat"|"reminder_time"|"subtasks",
       "current": <current_value>,
       "suggested": <suggested_value>,
       "current_display": "<human readable current>",
@@ -74,6 +74,65 @@ IMPORTANT: Always use these exact values for priority:
   "confidence": 0.80
 }
 
+### Project Suggestion
+{
+  "type": "project",
+  "current": "Inbox",
+  "suggested": "Finance",
+  "current_display": "Inbox",
+  "suggested_display": "Finance",
+  "reason": "Task mentions Q4 financials; align with Finance project",
+  "confidence": 0.82
+}
+
+### Time Estimate Suggestion
+{
+  "type": "time_estimate",
+  "current": null,
+  "suggested": 120,
+  "current_display": "Not set",
+  "suggested_display": "2h 0m",
+  "reason": "Review + slides typically take ~2 hours",
+  "confidence": 0.78
+}
+
+### Repeat Pattern Suggestion
+{
+  "type": "repeat",
+  "current": null,
+  "suggested": "RRULE:FREQ=WEEKLY;BYDAY=MO",
+  "current_display": "None",
+  "suggested_display": "Weekly on Monday",
+  "reason": "Title says weekly standup",
+  "confidence": 0.9
+}
+
+### Reminder Suggestion
+{
+  "type": "reminder_time",
+  "current": null,
+  "suggested": "2025-12-15T09:00:00Z",
+  "current_display": "None",
+  "suggested_display": "Dec 15, 9:00 AM",
+  "reason": "Set reminder on morning of due date",
+  "confidence": 0.7
+}
+
+### Subtask Suggestion
+{
+  "type": "subtasks",
+  "current": [],
+  "suggested": [
+    "Draft slides",
+    "Review metrics",
+    "Rehearse presentation"
+  ],
+  "current_display": "No subtasks",
+  "suggested_display": "Draft slides; Review metrics; Rehearse presentation",
+  "reason": "Large task benefits from 3 concrete steps",
+  "confidence": 0.76
+}
+
 ### Quadrant Suggestion
 {
   "type": "quadrant",
@@ -98,6 +157,7 @@ IMPORTANT: Always use these exact values for priority:
    - 0.5-0.69: Moderate (some uncertainty)
    - Below 0.5: Don't suggest (too uncertain)
 7. **TickTick compatibility**: All dates in ISO format, priority as 0/1/3/5
+8. If repeat pattern is suggested, use RRULE strings (e.g., RRULE:FREQ=WEEKLY;BYDAY=MO)
 
 ## Example Input:
 {
@@ -107,6 +167,9 @@ IMPORTANT: Always use these exact values for priority:
   "ticktick_priority": 1,
   "project_name": "Work - Q4 Planning",
   "ticktick_tags": ["work"],
+  "repeat_flag": null,
+  "reminder_time": null,
+  "time_estimate": null,
   "related_tasks_in_project": [
     {"title": "Gather Q4 metrics", "status": "completed"},
     {"title": "Schedule leadership meeting", "status": "pending", "due_date": "2025-12-18"}

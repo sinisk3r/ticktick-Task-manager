@@ -12,12 +12,15 @@ import { DatePicker } from "@/components/DatePicker"
 import { MetadataRow } from "@/components/MetadataRow"
 import { MarkdownEditor } from "@/components/MarkdownEditor"
 import { SuggestionPanel } from "@/components/SuggestionPanel"
-import { api } from "@/lib/api"
-import { X, Star, Trash2, AlertCircle } from "lucide-react"
+import { api, API_BASE } from "@/lib/api"
+import { X, Trash2, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Task, SuggestionsResponse } from "@/types/task"
+import { ProjectSelector } from "@/components/metadata/ProjectSelector"
+import { TagsInput } from "@/components/metadata/TagsInput"
+import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
+import { TimeEstimateInput } from "@/components/metadata/TimeEstimateInput"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 interface TaskDetailPopoverProps {
@@ -253,28 +256,59 @@ export function TaskDetailPopover({
               />
             </MetadataRow>
 
-            {localTask.project_name && (
-              <MetadataRow icon="🏷️" label="Project">
-                <div className="flex items-center h-9">
-                  <Badge variant="outline">{localTask.project_name}</Badge>
-                </div>
-              </MetadataRow>
-            )}
+            <MetadataRow icon="🗂️" label="Project">
+              <ProjectSelector
+                value={localTask.project_id ?? null}
+                onChange={(projectId, project) => {
+                  handleFieldChange("project_id", projectId, true)
+                  handleFieldChange("project_name", project?.name || null, true)
+                  handleFieldChange("ticktick_project_id", project?.ticktick_project_id || null, true)
+                }}
+              />
+            </MetadataRow>
+
+            <MetadataRow icon="🔔" label="Reminder">
+              <DatePicker
+                value={localTask.reminder_time}
+                onChange={(date) => handleFieldChange("reminder_time", date, true)}
+                placeholder="No reminder"
+              />
+            </MetadataRow>
+
+            <MetadataRow icon="🔁" label="Repeat">
+              <RepeatPatternSelect
+                value={localTask.repeat_flag}
+                onChange={(pattern) => handleFieldChange("repeat_flag", pattern, true)}
+              />
+            </MetadataRow>
+
+            <MetadataRow icon="⏱️" label="Time Estimate">
+              <TimeEstimateInput
+                value={localTask.time_estimate ?? null}
+                onChange={(minutes) => handleFieldChange("time_estimate", minutes, true)}
+              />
+            </MetadataRow>
+
+            <MetadataRow icon="☀️" label="All Day">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={Boolean(localTask.all_day)}
+                  onCheckedChange={(checked) => handleFieldChange("all_day", Boolean(checked), true)}
+                />
+                <span className="text-sm text-muted-foreground">All day</span>
+              </div>
+            </MetadataRow>
           </div>
 
           {/* Tags */}
-          {localTask.ticktick_tags && localTask.ticktick_tags.length > 0 && (
-            <div>
-              <label className="text-sm text-muted-foreground mb-2 block">Tags</label>
-              <div className="flex flex-wrap gap-2">
-                {localTask.ticktick_tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
+          <div>
+            <label className="text-sm text-muted-foreground mb-2 block">Tags</label>
+            <TagsInput
+              value={localTask.ticktick_tags || []}
+              onChange={(tags) => handleFieldChange("ticktick_tags", tags, true)}
+              placeholder="Add tags..."
+            />
+          </div>
 
           {/* Description with Markdown Support */}
           <MarkdownEditor

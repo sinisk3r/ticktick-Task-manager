@@ -14,6 +14,7 @@ import {
   ListTodo,
   RefreshCw,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -21,6 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import useSWR, { mutate } from "swr";
 import { QuickAddTaskModal } from "@/components/QuickAddTaskModal";
+import { API_BASE } from "@/lib/api";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -28,7 +30,6 @@ interface SidebarProps {
   isMobile: boolean;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 // Format time ago helper
@@ -151,8 +152,13 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
             {/* Header */}
             <div className="p-4 flex items-center justify-between border-b border-sidebar-border">
               <div className="flex items-center gap-2 font-semibold text-xl text-sidebar-foreground">
-                <div className="size-8 rounded-lg bg-sidebar-primary flex items-center justify-center text-sidebar-primary-foreground">
-                  <LayoutDashboard className="size-5" />
+                <div className="size-8 relative overflow-hidden rounded-lg">
+                  <Image
+                    src="/logo.png"
+                    alt="Context Logo"
+                    fill
+                    className="object-cover"
+                  />
                 </div>
                 <span>Context</span>
               </div>

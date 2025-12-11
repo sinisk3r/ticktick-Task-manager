@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CheckCircle2, XCircle, Loader2, Info, Link as LinkIcon, Unlink } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Textarea } from "@/components/ui/textarea"
+import { API_BASE } from "@/lib/api"
 
 export function LLMSettings() {
   const [selectedModel, setSelectedModel] = useState("qwen3:4b")
@@ -14,7 +15,7 @@ export function LLMSettings() {
   const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [saveMessage, setSaveMessage] = useState<string>("")
-  const [backendUrl] = useState("http://localhost:8000")
+  const [backendUrl] = useState(API_BASE)
 
   // TickTick state
   const [ticktickConnected, setTicktickConnected] = useState(false)

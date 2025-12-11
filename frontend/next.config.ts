@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
   /* config options here */
   env: {
     // Pass runtime backend URL to client-side code
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || "http://localhost:8000",
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || "http://localhost:5400",
   },
 };
 

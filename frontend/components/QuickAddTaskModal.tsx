@@ -10,10 +10,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { PrioritySelect } from "@/components/PrioritySelect"
 import { DatePicker } from "@/components/DatePicker"
 import { MetadataRow } from "@/components/MetadataRow"
-import { Plus, Sparkles, AlertCircle, Loader2 } from "lucide-react"
+import { Plus, Sparkles, AlertCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react"
 import { mutate } from "swr"
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+import { ProjectSelector } from "@/components/metadata/ProjectSelector"
+import { TagsInput } from "@/components/metadata/TagsInput"
+import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
+import { TimeEstimateInput } from "@/components/metadata/TimeEstimateInput"
+import { Checkbox } from "@/components/ui/checkbox"
+import { API_BASE } from "@/lib/api"
 
 interface QuickAddTaskModalProps {
   open: boolean
@@ -32,7 +36,16 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [dueDate, setDueDate] = useState<string | null>(null)
+  const [startDate, setStartDate] = useState<string | null>(null)
   const [priority, setPriority] = useState(0)
+  const [projectId, setProjectId] = useState<number | null>(null)
+  const [projectName, setProjectName] = useState<string | null>(null)
+  const [tags, setTags] = useState<string[]>([])
+  const [reminderTime, setReminderTime] = useState<string | null>(null)
+  const [repeatFlag, setRepeatFlag] = useState<string | null>(null)
+  const [timeEstimate, setTimeEstimate] = useState<number | null>(null)
+  const [allDay, setAllDay] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,6 +117,15 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
         title: title.trim(),
         description: description.trim() || null,
         due_date: dueDate,
+        start_date: startDate,
+        ticktick_priority: priority,
+        project_id: projectId,
+        project_name: projectName,
+        ticktick_tags: tags,
+        reminder_time: reminderTime,
+        repeat_flag: repeatFlag,
+        time_estimate: timeEstimate,
+        all_day: allDay,
         user_id: 1
       }
 
@@ -129,6 +151,15 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
       setDueDate(null)
       setPriority(0)
       setLlmSuggestion(null)
+      setStartDate(null)
+      setProjectId(null)
+      setProjectName(null)
+      setTags([])
+      setReminderTime(null)
+      setRepeatFlag(null)
+      setTimeEstimate(null)
+      setAllDay(false)
+      setShowMore(false)
 
       // Close modal
       onOpenChange(false)
@@ -145,7 +176,16 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
     setTitle("")
     setDescription("")
     setDueDate(null)
+    setStartDate(null)
     setPriority(0)
+    setProjectId(null)
+    setProjectName(null)
+    setTags([])
+    setReminderTime(null)
+    setRepeatFlag(null)
+    setTimeEstimate(null)
+    setAllDay(false)
+    setShowMore(false)
     setLlmSuggestion(null)
     setError(null)
     onOpenChange(false)
@@ -275,12 +315,78 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
               />
             </MetadataRow>
 
+            <MetadataRow icon="🏁" label="Start Date">
+              <DatePicker
+                value={startDate}
+                onChange={(date) => setStartDate(date)}
+                placeholder="No start date"
+              />
+            </MetadataRow>
+
             <MetadataRow icon="⭐" label="Priority">
               <PrioritySelect
                 value={priority}
                 onChange={setPriority}
               />
             </MetadataRow>
+
+            <MetadataRow icon="🗂️" label="Project">
+              <ProjectSelector
+                value={projectId}
+                onChange={(id, project) => {
+                  setProjectId(id)
+                  setProjectName(project?.name || null)
+                }}
+              />
+            </MetadataRow>
+          </div>
+
+          <MetadataRow icon="🏷️" label="Tags">
+            <TagsInput value={tags} onChange={setTags} />
+          </MetadataRow>
+
+          <div className="border rounded-lg p-3 space-y-3">
+            <button
+              type="button"
+              className="flex items-center justify-between w-full text-sm font-medium"
+              onClick={() => setShowMore(!showMore)}
+            >
+              <span className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                More options
+              </span>
+              {showMore ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+
+            {showMore && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <MetadataRow icon="🔁" label="Repeat">
+                  <RepeatPatternSelect value={repeatFlag} onChange={setRepeatFlag} />
+                </MetadataRow>
+
+                <MetadataRow icon="🔔" label="Reminder">
+                  <DatePicker
+                    value={reminderTime}
+                    onChange={setReminderTime}
+                    placeholder="No reminder"
+                  />
+                </MetadataRow>
+
+                <MetadataRow icon="⏱️" label="Time Estimate">
+                  <TimeEstimateInput value={timeEstimate} onChange={setTimeEstimate} />
+                </MetadataRow>
+
+                <MetadataRow icon="☀️" label="All Day">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={allDay}
+                      onCheckedChange={(checked) => setAllDay(Boolean(checked))}
+                    />
+                    <span className="text-sm text-muted-foreground">Mark as all-day</span>
+                  </div>
+                </MetadataRow>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

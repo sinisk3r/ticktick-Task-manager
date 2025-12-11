@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RefreshCw, CheckCircle2 } from "lucide-react"
+import { API_BASE } from "@/lib/api"
 
 interface AnalysisResult {
   urgency_score: number
@@ -43,7 +44,7 @@ export function TaskAnalyzer() {
     setResult(null)
 
     try {
-      const response = await fetch("http://localhost:8000/api/analyze", {
+      const response = await fetch(`${API_BASE}/api/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -73,7 +74,7 @@ export function TaskAnalyzer() {
     setSyncResult(null)
 
     try {
-      const response = await fetch("http://localhost:8000/api/tasks/sync?user_id=1", {
+      const response = await fetch(`${API_BASE}/api/tasks/sync?user_id=1`, {
         method: "POST",
       })
 
