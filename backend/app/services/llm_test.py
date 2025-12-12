@@ -1,5 +1,8 @@
 """
 Service for testing LLM configuration connections.
+
+⚠️ SECURITY WARNING: SSL verification is disabled for cloud LLM APIs due to macOS SSL certificate issues.
+This is a development-only workaround. Never deploy to production with SSL verification disabled.
 """
 import time
 from typing import Optional, Dict, Any
@@ -7,6 +10,11 @@ import httpx
 from pydantic import BaseModel
 
 from app.models.llm_configuration import LLMConfiguration, LLMProvider
+
+# SSL verification setting for cloud LLM APIs
+# NOTE: Temporarily disabled due to macOS SSL certificate issues
+# TODO: Re-enable once proper certificate configuration is resolved
+_SSL_VERIFY = False  # Set to False to disable SSL verification (development only)
 
 
 class ConnectionTestResult(BaseModel):
@@ -135,7 +143,7 @@ async def _test_openrouter_connection(config: LLMConfiguration, start_time: floa
             error="API key is required for OpenRouter"
         )
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
                 "model": config.model,
@@ -202,7 +210,7 @@ async def _test_anthropic_connection(config: LLMConfiguration, start_time: float
             error="API key is required for Anthropic Claude"
         )
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
                 "model": config.model,
@@ -270,7 +278,7 @@ async def _test_openai_connection(config: LLMConfiguration, start_time: float) -
             error="API key is required for OpenAI"
         )
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
                 "model": config.model,
