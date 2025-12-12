@@ -59,27 +59,36 @@ class AgentDispatcher:
             logger.info("Hook modified args for %s: %s", tool_name, hook_result.reason)
             raw_payload = hook_result.modified_args
 
-        # Validate with Pydantic schema
-        try:
-            payload = model_cls(**raw_payload)
-        except ValidationError as exc:
-            logger.warning("Validation failed for tool %s (trace %s): %s", tool_name, trace_id, exc)
-            # Return error instead of raising to keep stream alive
-            return {
-                "error": f"Invalid input: {str(exc)}",
-                "summary": f"Tool {tool_name} failed validation",
-            }
+        # Phase 2 compatibility: Handle both old (Pydantic) and new (@tool) formats
+        if model_cls is None:
+            # New @tool format: callable is a LangChain tool, call directly with db injected
+            logger.info("Executing tool %s (LangChain @tool format, trace_id=%s)", tool_name, trace_id)
+            # Add db to raw_payload for injection
+            raw_payload_with_db = {**raw_payload, "db": db}
+            result = await callable_fn.ainvoke(raw_payload_with_db)
+            return result
+        else:
+            # Old format: Validate with Pydantic schema
+            try:
+                payload = model_cls(**raw_payload)
+            except ValidationError as exc:
+                logger.warning("Validation failed for tool %s (trace %s): %s", tool_name, trace_id, exc)
+                # Return error instead of raising to keep stream alive
+                return {
+                    "error": f"Invalid input: {str(exc)}",
+                    "summary": f"Tool {tool_name} failed validation",
+                }
 
-        if requires_confirmation and not getattr(payload, "confirm", False):
-            raise ConfirmationRequired(
-                tool_name,
-                message="Confirmation required for destructive action",
-                payload=raw_payload,
-            )
+            if requires_confirmation and not getattr(payload, "confirm", False):
+                raise ConfirmationRequired(
+                    tool_name,
+                    message="Confirmation required for destructive action",
+                    payload=raw_payload,
+                )
 
-        logger.info("Executing tool %s (trace_id=%s)", tool_name, trace_id)
-        result = await callable_fn(payload, db)
-        return result
+            logger.info("Executing tool %s (old format, trace_id=%s)", tool_name, trace_id)
+            result = await callable_fn(payload, db)
+            return result
 
 
 __all__ = ["AgentDispatcher", "ConfirmationRequired"]

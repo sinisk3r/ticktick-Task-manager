@@ -1,17 +1,21 @@
 """
-Tool implementations for the agent runtime.
+Tool implementations for the agent runtime using LangChain @tool decorator.
 
-Each tool has a Pydantic input schema and returns a structured dict that can
-be streamed to the frontend timeline.
+Each tool returns a structured dict that can be streamed to the frontend timeline.
+Tools are automatically discovered via the @tool decorator.
+
+Note: The 'db' parameter is injected by the dispatcher and is NOT visible to the LLM.
+We use Annotated with InjectedToolArg to hide it from schema generation.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from langchain_core.tools import InjectedToolArg
+from langchain.tools import tool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,131 +71,63 @@ def task_to_payload(task: Task) -> Dict[str, Any]:
 
 
 # -----------------------------------------------------------------------------
-# Input schemas
+# Tool implementations using @tool decorator
 # -----------------------------------------------------------------------------
 
 
-class FetchTasksInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    status: Optional[TaskStatus] = None
-    quadrant: Optional[EisenhowerQuadrant] = None
-    limit: int = Field(50, ge=1, le=200)
-    offset: int = Field(0, ge=0)
+@tool(parse_docstring=True)
+async def fetch_tasks(
+    user_id: int,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+    status: Optional[str] = None,
+    quadrant: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """List tasks for the user with optional filters.
 
+    Use this tool to retrieve tasks for a user. You can filter by status
+    (ACTIVE, COMPLETED, DELETED) or eisenhower quadrant (Q1, Q2, Q3, Q4).
+    Results are paginated with limit and offset.
 
-class FetchTaskInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    task_id: int = Field(..., gt=0)
+    Args:
+        user_id: User ID for ownership checks (required)
+        status: Optional task status filter (ACTIVE, COMPLETED, DELETED)
+        quadrant: Optional eisenhower quadrant filter (Q1, Q2, Q3, Q4)
+        limit: Maximum number of tasks to return (default: 50, max: 200)
+        offset: Number of tasks to skip for pagination (default: 0)
+    """
+    # Validate limit
+    if limit < 1 or limit > 200:
+        limit = min(max(limit, 1), 200)
+    if offset < 0:
+        offset = 0
 
+    query = select(Task).where(Task.user_id == user_id)
 
-class CreateTaskInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    title: str = Field(
-        ...,
-        min_length=1,
-        max_length=120,
-        description="Concise task title without quotes, max 120 chars",
-    )
-    description: Optional[str] = Field(
-        None,
-        description="Optional details that must differ from title. Provide meaningful context or leave None.",
-    )
-    due_date: Optional[datetime] = Field(None, description="ISO datetime string if task has a deadline")
-    ticktick_priority: Optional[int] = Field(
-        None, ge=0, le=5, description="Priority: 0 (none), 1 (low), 3 (medium), 5 (high)"
-    )
-    ticktick_tags: Optional[List[str]] = Field(default_factory=list, description="List of tag strings")
-    project_id: Optional[int] = None
-    project_name: Optional[str] = None
-    ticktick_project_id: Optional[str] = None
+    # Parse status enum if provided
+    if status:
+        try:
+            status_enum = TaskStatus(status)
+            query = query.where(Task.status == status_enum)
+        except ValueError:
+            pass  # Ignore invalid status values
 
-    @validator("title")
-    def clean_title(cls, value: str) -> str:
-        """Remove quotes, trim whitespace, enforce length limit."""
-        cleaned = value.strip().strip('"').strip("'")
-        if not cleaned:
-            raise ValueError("title cannot be empty after cleaning")
-        if len(cleaned) > 120:
-            cleaned = cleaned[:117] + "..."
-        return cleaned
-
-    @validator("description")
-    def prevent_duplicate_description(cls, value: Optional[str], values: dict) -> Optional[str]:
-        """Ensure description differs from title and adds value."""
-        if not value:
-            return None
-
-        cleaned_desc = value.strip()
-        if not cleaned_desc:
-            return None
-
-        # Get the already-validated title from values
-        title = values.get("title", "")
-
-        # Reject if description exactly matches title
-        if cleaned_desc == title:
-            raise ValueError("description must differ from title - omit description if no additional context")
-
-        # Reject if description is just title with minor changes
-        if cleaned_desc.lower() == title.lower():
-            return None
-
-        # If description is very short (<10 chars), it likely doesn't add value
-        if len(cleaned_desc) < 10:
-            return None
-
-        return cleaned_desc
-
-
-class CompleteTaskInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    task_id: int = Field(..., gt=0)
-
-
-class DeleteTaskInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    task_id: int = Field(..., gt=0)
-    confirm: bool = Field(False, description="Must be true for destructive actions")
-    soft_delete: bool = True
-
-
-class QuickAnalyzeInput(BaseModel):
-    user_id: int = Field(..., gt=0)
-    title: Optional[str] = Field(None, max_length=500)
-    description: str = Field(..., min_length=1)
-    due_date: Optional[datetime] = None
-
-    @validator("title", always=True)
-    def set_default_title(cls, value: Optional[str], values: Dict[str, Any]):
-        if value:
-            return value
-        # If no title, fall back to first 80 chars of description
-        description = values.get("description", "")
-        return (description[:77] + "...") if len(description) > 80 else description
-
-
-# -----------------------------------------------------------------------------
-# Tool implementations
-# -----------------------------------------------------------------------------
-
-
-async def fetch_tasks(payload: FetchTasksInput, db: AsyncSession) -> Dict[str, Any]:
-    """Return a list of tasks scoped to the user."""
-    query = select(Task).where(Task.user_id == payload.user_id)
-
-    if payload.status:
-        query = query.where(Task.status == payload.status)
-
-    if payload.quadrant:
-        query = query.where(
-            (Task.manual_quadrant_override == payload.quadrant)
-            | (
-                Task.manual_quadrant_override.is_(None)
-                & (Task.eisenhower_quadrant == payload.quadrant)
+    # Parse quadrant enum if provided
+    if quadrant:
+        try:
+            quadrant_enum = EisenhowerQuadrant(quadrant)
+            query = query.where(
+                (Task.manual_quadrant_override == quadrant_enum)
+                | (
+                    Task.manual_quadrant_override.is_(None)
+                    & (Task.eisenhower_quadrant == quadrant_enum)
+                )
             )
-        )
+        except ValueError:
+            pass  # Ignore invalid quadrant values
 
-    query = query.order_by(Task.created_at.desc()).limit(payload.limit).offset(payload.offset)
+    query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
 
     result = await db.execute(query)
     tasks = result.scalars().all()
@@ -203,10 +139,26 @@ async def fetch_tasks(payload: FetchTasksInput, db: AsyncSession) -> Dict[str, A
     }
 
 
-async def fetch_task(payload: FetchTaskInput, db: AsyncSession) -> Dict[str, Any]:
-    """Return a single task if it belongs to the user."""
+@tool(parse_docstring=True)
+async def fetch_task(
+    user_id: int,
+    task_id: int,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+) -> Dict[str, Any]:
+    """Get a single task by ID.
+
+    Use this tool to retrieve detailed information about a specific task.
+    Returns an error if the task doesn't exist or doesn't belong to the user.
+
+    Args:
+        user_id: User ID for ownership checks (required)
+        task_id: ID of the task to retrieve (required, must be > 0)
+    """
+    if task_id <= 0:
+        return {"error": "task_id must be greater than 0"}
+
     result = await db.execute(
-        select(Task).where(Task.id == payload.task_id, Task.user_id == payload.user_id)
+        select(Task).where(Task.id == task_id, Task.user_id == user_id)
     )
     task = result.scalar_one_or_none()
     if not task:
@@ -215,18 +167,78 @@ async def fetch_task(payload: FetchTaskInput, db: AsyncSession) -> Dict[str, Any
     return {"task": task_to_payload(task), "summary": f"Loaded task {task.id}"}
 
 
-async def create_task(payload: CreateTaskInput, db: AsyncSession) -> Dict[str, Any]:
-    """Create a task for the user."""
+@tool(parse_docstring=True)
+async def create_task(
+    user_id: int,
+    title: str,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+    description: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+    ticktick_priority: Optional[int] = None,
+    ticktick_tags: Optional[List[str]] = None,
+    project_id: Optional[int] = None,
+    project_name: Optional[str] = None,
+    ticktick_project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a new task for the user.
+
+    Use this tool to create tasks based on user requests. Provide a clear,
+    concise title (max 120 chars, no quotes). Only include description if it
+    adds meaningful context beyond the title - avoid duplicating the title.
+
+    Args:
+        user_id: User ID for ownership (required)
+        title: Concise task title without quotes, max 120 chars (required)
+        description: Optional details that differ from title. Provide meaningful context or omit.
+        due_date: Optional ISO datetime string if task has a deadline
+        ticktick_priority: Priority level - 0 (none), 1 (low), 3 (medium), 5 (high)
+        ticktick_tags: Optional list of tag strings
+        project_id: Optional project ID
+        project_name: Optional project name
+        ticktick_project_id: Optional TickTick project ID
+
+    Examples:
+        - create_task(user_id=1, title="Review PR #456", description="Full code review focusing on security and performance", ticktick_tags=["code-review", "urgent"])
+        - create_task(user_id=1, title="Weekly team sync", due_date="2025-12-15T10:00:00", ticktick_priority=3)
+        - create_task(user_id=1, title="Fix login bug", ticktick_priority=5, ticktick_tags=["bug"])
+    """
+    # Validate and clean title
+    if not title:
+        return {"error": "title cannot be empty"}
+
+    cleaned_title = title.strip().strip('"').strip("'")
+    if not cleaned_title:
+        return {"error": "title cannot be empty after cleaning"}
+
+    if len(cleaned_title) > 120:
+        cleaned_title = cleaned_title[:117] + "..."
+
+    # Validate and clean description
+    cleaned_description = None
+    if description:
+        cleaned_description = description.strip()
+        # Reject if description matches title
+        if cleaned_description == cleaned_title or cleaned_description.lower() == cleaned_title.lower():
+            cleaned_description = None
+        # Reject if too short to add value
+        elif len(cleaned_description) < 10:
+            cleaned_description = None
+
+    # Validate priority
+    if ticktick_priority is not None:
+        if ticktick_priority < 0 or ticktick_priority > 5:
+            return {"error": "ticktick_priority must be between 0 and 5"}
+
     task = Task(
-        user_id=payload.user_id,
-        title=payload.title,
-        description=payload.description,
-        due_date=payload.due_date,
-        ticktick_priority=payload.ticktick_priority or 0,
-        ticktick_tags=payload.ticktick_tags or [],
-        project_id=payload.project_id,
-        project_name=payload.project_name,
-        ticktick_project_id=payload.ticktick_project_id,
+        user_id=user_id,
+        title=cleaned_title,
+        description=cleaned_description,
+        due_date=due_date,
+        ticktick_priority=ticktick_priority or 0,
+        ticktick_tags=ticktick_tags or [],
+        project_id=project_id,
+        project_name=project_name,
+        ticktick_project_id=ticktick_project_id,
         status=TaskStatus.ACTIVE,
         is_sorted=False,
     )
@@ -234,18 +246,147 @@ async def create_task(payload: CreateTaskInput, db: AsyncSession) -> Dict[str, A
     await db.commit()
     await db.refresh(task)
 
-    logger.info("Agent created task %s for user %s", task.id, payload.user_id)
+    logger.info("Agent created task %s for user %s", task.id, user_id)
 
     return {
         "task": task_to_payload(task),
-        "summary": f"Created task “{task.title}”",
+        "summary": f"Created task '{task.title}'",
     }
 
 
-async def complete_task(payload: CompleteTaskInput, db: AsyncSession) -> Dict[str, Any]:
-    """Mark a task as completed."""
+@tool(parse_docstring=True)
+async def update_task(
+    user_id: int,
+    task_id: int,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+    start_date: Optional[datetime] = None,
+    ticktick_priority: Optional[int] = None,
+    ticktick_tags: Optional[List[str]] = None,
+    time_estimate: Optional[int] = None,
+    all_day: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Update an existing task with new values.
+
+    Use this tool to modify task properties. Only provide the fields you want
+    to change. The tool will track what changed and return a summary.
+
+    Args:
+        user_id: User ID for ownership validation (required)
+        task_id: ID of task to update (required, must be > 0)
+        title: New title (max 120 chars, quotes removed automatically)
+        description: New description or null to clear
+        due_date: New due date as ISO datetime
+        start_date: New start date as ISO datetime
+        ticktick_priority: New priority: 0 (none), 1 (low), 3 (medium), 5 (high)
+        ticktick_tags: New tags list
+        time_estimate: Duration in minutes (must be > 0)
+        all_day: All day event flag
+    """
+    if task_id <= 0:
+        return {"error": "task_id must be greater than 0"}
+
+    # Fetch task with ownership check
     result = await db.execute(
-        select(Task).where(Task.id == payload.task_id, Task.user_id == payload.user_id)
+        select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        return {"error": f"Task {task_id} not found or not owned by user"}
+
+    # Track what changed for summary
+    changes = []
+
+    # Clean and validate title if provided
+    if title is not None:
+        cleaned_title = title.strip().strip('"').strip("'")
+        if cleaned_title and cleaned_title != task.title:
+            if len(cleaned_title) > 120:
+                cleaned_title = cleaned_title[:117] + "..."
+            task.title = cleaned_title
+            changes.append(f"title → '{cleaned_title}'")
+
+    # Update description
+    if description is not None and description != task.description:
+        task.description = description
+        changes.append("description updated")
+
+    # Update dates
+    if due_date is not None and due_date != task.due_date:
+        task.due_date = due_date
+        changes.append(f"due date → {due_date.strftime('%Y-%m-%d %H:%M') if due_date else 'cleared'}")
+
+    if start_date is not None and start_date != task.start_date:
+        task.start_date = start_date
+        changes.append(f"start date → {start_date.strftime('%Y-%m-%d %H:%M')}")
+
+    # Validate and update priority
+    if ticktick_priority is not None:
+        if ticktick_priority < 0 or ticktick_priority > 5:
+            return {"error": "ticktick_priority must be between 0 and 5"}
+        if ticktick_priority != task.ticktick_priority:
+            task.ticktick_priority = ticktick_priority
+            changes.append(f"priority → {ticktick_priority}")
+
+    # Update tags
+    if ticktick_tags is not None and ticktick_tags != task.ticktick_tags:
+        task.ticktick_tags = ticktick_tags
+        changes.append(f"tags → {ticktick_tags}")
+
+    # Validate and update time estimate
+    if time_estimate is not None:
+        if time_estimate <= 0:
+            return {"error": "time_estimate must be greater than 0"}
+        if time_estimate != task.time_estimate:
+            task.time_estimate = time_estimate
+            changes.append(f"duration → {time_estimate} mins")
+
+    # Update all_day flag
+    if all_day is not None and all_day != task.all_day:
+        task.all_day = all_day
+        changes.append(f"all_day → {all_day}")
+
+    if not changes:
+        return {
+            "task": task_to_payload(task),
+            "summary": f"No changes made to task '{task.title}'"
+        }
+
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info("Agent updated task %s for user %s: %s", task.id, user_id, ", ".join(changes))
+
+    return {
+        "task": task_to_payload(task),
+        "summary": f"Updated task '{task.title}': {', '.join(changes)}",
+        "changes": changes
+    }
+
+
+@tool(parse_docstring=True)
+async def complete_task(
+    user_id: int,
+    task_id: int,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+) -> Dict[str, Any]:
+    """Mark a task as completed.
+
+    Use this tool when a user indicates they've finished a task or wants to
+    mark it as done. This changes the task status to COMPLETED.
+
+    Args:
+        user_id: User ID for ownership checks (required)
+        task_id: ID of the task to complete (required, must be > 0)
+    """
+    if task_id <= 0:
+        return {"error": "task_id must be greater than 0"}
+
+    result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.user_id == user_id)
     )
     task = result.scalar_one_or_none()
     if not task:
@@ -257,46 +398,97 @@ async def complete_task(payload: CompleteTaskInput, db: AsyncSession) -> Dict[st
     await db.commit()
     await db.refresh(task)
 
+    logger.info("Agent completed task %s for user %s", task.id, user_id)
+
     return {
         "task": task_to_payload(task),
-        "summary": f"Completed task “{task.title}”",
+        "summary": f"Completed task '{task.title}'",
     }
 
 
-async def delete_task(payload: DeleteTaskInput, db: AsyncSession) -> Dict[str, Any]:
-    """Soft delete or hard delete a task. Confirmation must be handled upstream."""
+@tool(parse_docstring=True)
+async def delete_task(
+    user_id: int,
+    task_id: int,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+    confirm: bool = False,
+    soft_delete: bool = True,
+) -> Dict[str, Any]:
+    """Delete a task (soft delete by default).
+
+    Use this tool to remove tasks. Soft delete (default) changes status to
+    DELETED but preserves the record. Hard delete permanently removes it.
+
+    Args:
+        user_id: User ID for ownership checks (required)
+        task_id: ID of the task to delete (required, must be > 0)
+        confirm: Must be true for destructive actions (default: False)
+        soft_delete: If true, soft delete (preserve record); if false, hard delete (default: True)
+    """
+    if task_id <= 0:
+        return {"error": "task_id must be greater than 0"}
+
     result = await db.execute(
-        select(Task).where(Task.id == payload.task_id, Task.user_id == payload.user_id)
+        select(Task).where(Task.id == task_id, Task.user_id == user_id)
     )
     task = result.scalar_one_or_none()
     if not task:
         return {"error": "Task not found"}
 
-    if payload.soft_delete:
+    task_title = task.title
+
+    if soft_delete:
         task.status = TaskStatus.DELETED
         task.updated_at = datetime.utcnow()
         await db.commit()
-        summary = f"Soft-deleted task “{task.title}”"
+        summary = f"Soft-deleted task '{task_title}'"
+        logger.info("Agent soft-deleted task %s for user %s", task_id, user_id)
     else:
         await db.delete(task)
         await db.commit()
-        summary = f"Deleted task “{task.title}”"
+        summary = f"Deleted task '{task_title}'"
+        logger.info("Agent hard-deleted task %s for user %s", task_id, user_id)
 
-    return {"summary": summary, "task_id": payload.task_id}
+    return {"summary": summary, "task_id": task_id}
 
 
-async def quick_analyze_task(payload: QuickAnalyzeInput, db: AsyncSession) -> Dict[str, Any]:
+@tool(parse_docstring=True)
+async def quick_analyze_task(
+    user_id: int,
+    description: str,
+    db: Annotated[AsyncSession, InjectedToolArg()],
+    title: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Run lightweight analysis on a task description.
+
+    Use this tool to get urgency/importance analysis and quadrant suggestions
+    for a task description using the Ollama LLM. Falls back gracefully if
+    the LLM is unavailable.
+
+    Args:
+        user_id: User ID for profile context (required)
+        description: Task description to analyze (required, min 1 char)
+        title: Optional task title (defaults to first 80 chars of description)
+        due_date: Optional due date as ISO datetime
     """
-    Lightweight analysis using the existing OllamaService.
+    if not description or len(description) < 1:
+        return {"error": "description must have at least 1 character"}
 
-    Falls back gracefully if the LLM is unavailable.
-    """
+    # Set default title if not provided
+    if not title:
+        title = (description[:77] + "...") if len(description) > 80 else description
+
+    # Validate title length
+    if title and len(title) > 500:
+        title = title[:497] + "..."
+
     ollama = OllamaService()
     profile_context = None
 
     # Try to fetch profile context; ignore errors in agent path
     try:
-        user_result = await db.execute(select(User).where(User.id == payload.user_id))
+        user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
         if user and user.profile:
             profile_context = build_profile_context(user.profile)
@@ -309,7 +501,7 @@ async def quick_analyze_task(payload: QuickAnalyzeInput, db: AsyncSession) -> Di
             "summary": "LLM unavailable; skipped analysis",
         }
 
-    analysis = await ollama.analyze_task(payload.description, profile_context=profile_context)
+    analysis = await ollama.analyze_task(description, profile_context=profile_context)
 
     return {
         "analysis": {
@@ -319,89 +511,74 @@ async def quick_analyze_task(payload: QuickAnalyzeInput, db: AsyncSession) -> Di
             "reasoning": analysis.reasoning,
         },
         "suggested_priority": analysis.urgency if analysis.urgency else None,
-        "title": payload.title,
+        "title": title,
         "summary": f"Analysis suggests {analysis.quadrant} (urgency {analysis.urgency}, importance {analysis.importance})",
     }
 
 
-# Registry of tools with metadata for dispatcher
+# -----------------------------------------------------------------------------
+# Backward compatibility layer for Phase 3 migration
+# -----------------------------------------------------------------------------
+# NOTE: TOOL_REGISTRY is kept temporarily for backward compatibility with
+# dispatcher.py. This will be removed in Phase 3 when dispatcher is migrated
+# to use LangChain's native tool discovery.
+
 TOOL_REGISTRY = {
     "fetch_tasks": {
-        "model": FetchTasksInput,
+        "model": None,  # No longer needed - schema auto-generated
         "callable": fetch_tasks,
-        "description": "List tasks for the user. Accepts status/quadrant filters.",
+        "description": fetch_tasks.description,
         "requires_confirmation": False,
     },
     "fetch_task": {
-        "model": FetchTaskInput,
+        "model": None,
         "callable": fetch_task,
-        "description": "Load a single task by id.",
+        "description": fetch_task.description,
         "requires_confirmation": False,
     },
     "create_task": {
-        "model": CreateTaskInput,
+        "model": None,
         "callable": create_task,
-        "description": "Create a new task with optional due date and tags.",
+        "description": create_task.description,
         "requires_confirmation": False,
-        "examples": [
-            {
-                "title": "Review PR #456",
-                "description": "Full code review focusing on security and performance",
-                "ticktick_tags": ["code-review", "urgent"],
-            },
-            {
-                "title": "Weekly team sync",
-                "description": "Discuss sprint progress and blockers with engineering team",
-                "due_date": "2025-12-15T10:00:00",
-                "ticktick_priority": 3,
-            },
-            {
-                "title": "Fix login bug",
-                "description": None,  # No description if title is self-explanatory
-                "ticktick_priority": 5,
-                "ticktick_tags": ["bug"],
-            },
-        ],
-        "common_mistakes": [
-            "Setting description to same value as title",
-            "Including quotes around title",
-            "Creating vague titles like 'New task' or 'Do something'",
-        ],
+    },
+    "update_task": {
+        "model": None,
+        "callable": update_task,
+        "description": update_task.description,
+        "requires_confirmation": False,
     },
     "complete_task": {
-        "model": CompleteTaskInput,
+        "model": None,
         "callable": complete_task,
-        "description": "Mark a task as completed.",
+        "description": complete_task.description,
         "requires_confirmation": False,
     },
     "delete_task": {
-        "model": DeleteTaskInput,
+        "model": None,
         "callable": delete_task,
-        "description": "Delete a task (soft by default).",
-        "requires_confirmation": False,  # confirmations disabled per current stance
+        "description": delete_task.description,
+        "requires_confirmation": False,
     },
     "quick_analyze_task": {
-        "model": QuickAnalyzeInput,
+        "model": None,
         "callable": quick_analyze_task,
-        "description": "Run lightweight analysis on a description.",
+        "description": quick_analyze_task.description,
         "requires_confirmation": False,
     },
 }
 
 
+# Export all tools for discovery
 __all__ = [
-    "TOOL_REGISTRY",
+    "TOOL_REGISTRY",  # Temporary - will be removed in Phase 3
     "fetch_tasks",
     "fetch_task",
     "create_task",
+    "update_task",
     "complete_task",
     "delete_task",
     "quick_analyze_task",
-    "FetchTasksInput",
-    "FetchTaskInput",
-    "CreateTaskInput",
-    "CompleteTaskInput",
-    "DeleteTaskInput",
-    "QuickAnalyzeInput",
+    "task_to_payload",
 ]
 

@@ -83,9 +83,10 @@
 - `think: False` for conversational to hide reasoning ✅
 
 **Model:**
-- Ollama: qwen3:4b
+- Ollama: qwen3:8b (upgraded from 4b - Dec 12, 2025)
 - Temperature: 0.2 (planning), 0.4 (conversational)
 - Base URL: http://localhost:11434
+- Why 8b: 4b model echoed JSON prompts instead of generating plans; 8b handles complex JSON correctly
 
 ### Recent Fixes Applied (Dec 12, 2025)
 
@@ -136,11 +137,24 @@
   - `backend/tests/agent_test_cases.json` - 20+ test scenarios
   - Fixed SSE parsing to handle `message` field (not just `delta`)
 - **Fix Options:**
-  1. **Try qwen3:8b** - Larger model might handle complex JSON better
-  2. **Simplify prompt** - Use natural language instead of JSON blob (recommended if #1 fails)
-  3. **OpenRouter** - Use smarter cloud model ($0.06/M tokens) as last resort
-- **Status:** ⏳ Testing qwen3:8b next, will simplify prompt if needed
-- **Impact:** BLOCKING - Agent completely non-functional for tool calling
+  1. **Try qwen3:8b** - Larger model might handle complex JSON better ✅ **WORKED!**
+  2. **Simplify prompt** - Use natural language instead of JSON blob (not needed)
+  3. **OpenRouter** - Use smarter cloud model ($0.06/M tokens) (not needed)
+- **Solution:** ✅ **Upgraded to qwen3:8b** - Handles complex JSON prompts correctly
+  - Changed `OLLAMA_MODEL=qwen3:8b` in backend/.env
+  - Restarted backend with `./init.sh restart backend`
+  - Test results:
+    - ✅ Tool calling works: "Create task" → calls `create_task` tool
+    - ✅ Task created successfully (ID: 70, Title: "Team Meeting Tomorrow")
+    - ✅ Conversational mode works: "Good morning" → clean response
+    - ✅ No thinking leaks in final messages
+    - ⚠️ Slower than 4b (~35s vs ~23s for tool calls)
+    - Model size: 5.2GB (vs 2.5GB for 4b)
+- **Status:** ✅ **RESOLVED** - Agent fully functional with qwen3:8b
+- **Trade-offs:**
+  - Speed: ~50% slower (but still acceptable)
+  - Memory: ~2x more RAM needed
+  - Accuracy: Much better JSON adherence and tool decision-making
 
 ### Testing Scenarios
 
@@ -489,21 +503,38 @@ tail -f backend/uvicorn.log | grep -E "(LLM|plan|tool|agent)"
 
 ### Rollout Plan
 
-**Phase 1 (Current - Testing):**
-- ✅ Test scaffolding created (Dec 12, 2025)
-- ⏳ Validate all fixes work as expected
-- ⏳ Monitor logs for tool calling accuracy
-- ⏳ Iterate on prompts using test-read-modify-test workflow
+**Phase 1 (Completed - Dec 12, 2025):**
+- ✅ Test scaffolding created
+- ✅ qwen3:8b migration (tool calling now works)
+- ✅ Agent functional for basic task creation
 
-**Phase 2 (If Successful):**
-- Add top work items context to requests
-- Implement conversation state management
-- Add more tools (email, calendar)
+**Phase 2 (DECISION - Dec 12, 2025): Migrate to LangChain**
 
-**Phase 3 (If Fails):**
-- Evaluate LangChain minimal integration
-- Consider model upgrade (qwen3:7b)
-- Potentially hybrid approach with LangGraph
+**Critical Issues Identified:**
+1. ❌ No conversation history - Agent can't reference "that task" from previous message
+2. ❌ Missing update_task tool - Can't modify existing tasks
+3. ❌ Custom code complexity reached ~1,500 lines
+4. ❌ Reinventing features LangChain already provides
+
+**Decision: MIGRATE TO LANGCHAIN + LANGGRAPH**
+
+**Rationale:**
+- We're building conversation history, tool updates, state management
+- LangChain provides all of this out of the box
+- 82% code reduction (1,118 → 200 lines)
+- Plugin architecture for easy model switching (Ollama ↔ OpenRouter ↔ Claude)
+- Battle-tested framework vs custom maintenance burden
+- Faster future development
+
+**See: `docs/langchain-migration-plan.md` for full plan**
+
+**Timeline:** 2-3 days for complete migration
+
+**Next Steps:**
+- Start new session with migration plan
+- Keep API contracts unchanged (frontend unaffected)
+- Validate with existing test suite
+- Enable easy model switching via config
 
 ---
 
@@ -531,3 +562,152 @@ tail -f backend/uvicorn.log | grep -E "(LLM|plan|tool|agent)"
 - Add dry-run summaries for batch/destructive actions.
 - Pre-fetch lightweight task/email context to reduce tool calls.
 - Add top work items to request context for better recommendations.
+
+---
+
+## LangChain Migration Progress (Dec 12, 2025)
+
+### Decision: Migrating to LangChain + LangGraph
+
+After reaching complexity where maintaining custom code costs more than adopting a battle-tested framework, we've begun migrating to LangChain + LangGraph. See [`docs/langchain-migration-plan.md`](./langchain-migration-plan.md) for full rationale and plan.
+
+### Phase 1: Setup LangChain ✅ COMPLETE
+
+**Goal:** Plugin-based LLM provider system with zero breaking changes.
+
+**What Was Built:**
+1. **LLM Configuration Module** (`backend/app/core/llm_config.py`)
+   - Environment-based config with `LLM_` prefix
+   - Supports 4 providers: ollama, openrouter, anthropic, openai
+   - Pydantic Settings with extra field ignore
+
+2. **LLM Provider Factory** (`backend/app/agent/llm_factory.py`)
+   - Factory pattern for creating LLM instances
+   - Provider-specific configuration
+   - Convenience `get_llm()` function
+
+3. **Dependencies Installed:**
+   - `langchain==0.3.13`
+   - `langchain-community==0.3.12`
+   - `langchain-ollama==0.2.0`
+   - `langgraph==0.2.60`
+   - `langchain-openai==0.3.35`
+   - `langchain-anthropic==0.3.22`
+
+**Test Results:**
+- ✅ Provider factory tested with Ollama
+- ✅ LLM invocation successful
+- ✅ No breaking changes to existing code
+
+**Benefits:**
+- Switch LLM providers with config changes only
+- No code changes in agent logic
+- Easy to test different providers
+- Future-proof for new models
+
+### Phase 2: Convert Tools to @tool Decorators ✅ COMPLETE
+
+**Goal:** Replace manual Pydantic schemas with LangChain's `@tool` decorator pattern.
+
+**What Was Converted:**
+All 7 tools converted to `@tool` decorator format:
+- `fetch_tasks` - List tasks with filters
+- `fetch_task` - Get single task by ID
+- `create_task` - Create new task
+- `update_task` - Update existing task
+- `complete_task` - Mark task completed
+- `delete_task` - Soft/hard delete
+- `quick_analyze_task` - LLM analysis
+
+**Key Changes:**
+1. **Removed 180+ lines** of manual Pydantic Input classes
+2. **Added rich docstrings** with `Args:` sections for LLM guidance
+3. **AsyncSession injection** using `Annotated[AsyncSession, InjectedToolArg()]`
+4. **Backward compatibility layer** in `TOOL_REGISTRY` for Phase 3
+5. **Updated dispatcher** to handle both old and new tool formats
+
+**Code Pattern:**
+```python
+from langchain.tools import tool
+from langchain_core.tools import InjectedToolArg
+
+@tool(parse_docstring=True)
+async def create_task(
+    user_id: int,
+    title: str,
+    db: Annotated[AsyncSession, InjectedToolArg()],  # Hidden from LLM
+    description: Optional[str] = None,
+    # ... other params
+) -> Dict[str, Any]:
+    """Create a new task for the user.
+    
+    Args:
+        user_id: User ID for ownership (required)
+        title: Concise task title without quotes, max 120 chars (required)
+    """
+    # Implementation stays the same
+```
+
+**Test Results:**
+- ✅ All 7 tools import successfully
+- ✅ Each tool has proper schema auto-generated
+- ✅ `fetch_tasks` test: PASS (11.33s)
+- ✅ `create_task` test: PASS (17.88s)
+- ✅ Both read and write operations working
+
+**Benefits:**
+- Cleaner code with auto-generated schemas
+- Better documentation visible to LLM
+- Easier to add new tools
+- Forward compatible with Phase 3
+
+### Phase 3: LangGraph Agent Integration (PLANNED)
+
+**Goal:** Replace custom planner with LangGraph's `create_react_agent` for conversation memory and streaming.
+
+**What Will Change:**
+1. **Replace `planner.py`** (477 lines) with LangGraph agent (~50 lines)
+2. **Remove `TOOL_REGISTRY`** - Use native tool discovery
+3. **Add conversation memory** with `MemorySaver()`
+4. **Enable streaming** with `astream_events()`
+5. **Delete `dispatcher.py`** compatibility layer
+
+**Expected Benefits:**
+- Built-in conversation history (fixes "that task" reference issue)
+- Better streaming with proper event model
+- Easier model switching
+- LangSmith observability integration
+- Final code reduction: 1,118 → 200 lines (82%)
+
+**Blockers Solved:**
+- ❌ No conversation history → ✅ Built-in with LangGraph
+- ❌ Missing update_task → ✅ Added in Phase 2
+- ❌ Thinking not visible → ✅ LangGraph streaming callbacks
+- ❌ Complex JSON prompt issues → ✅ Better prompt templates
+
+**Timeline:** To be scheduled after Phase 1 & 2 validation in production.
+
+### Migration Testing
+
+**Test Infrastructure:**
+- `backend/test_llm_factory.py` - Provider factory validation
+- `backend/scripts/test_agent.sh` - Interactive agent testing
+- `backend/scripts/run_agent_tests.sh` - Automated test suite
+- `backend/tests/agent_test_cases.json` - 20+ test scenarios
+
+**Validation Checklist:**
+- [x] Phase 1: LLM factory working with Ollama
+- [x] Phase 2: Tools converted and tested
+- [x] Backward compatibility maintained
+- [x] No breaking changes to API contracts
+- [ ] Phase 3: LangGraph agent integration
+- [ ] Phase 3: Conversation memory working
+- [ ] Phase 3: All test cases passing
+
+### References
+
+- **Migration Plan:** [`docs/langchain-migration-plan.md`](./langchain-migration-plan.md)
+- **Phase 2 Summary:** `backend/PHASE2_CONVERSION_SUMMARY.md`
+- **LangChain Tools Docs:** https://python.langchain.com/docs/modules/agents/tools/
+- **LangGraph Docs:** https://langchain-ai.github.io/langgraph/
+

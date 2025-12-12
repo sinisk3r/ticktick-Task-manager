@@ -19,6 +19,12 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULTS_FILE="$RESULTS_DIR/agent_tests_$TIMESTAMP.json"
 REPORT_FILE="$RESULTS_DIR/agent_report_$TIMESTAMP.txt"
 
+# Load runtime config if available
+RUNTIME_ENV="$(cd "$SCRIPT_DIR/../.." && pwd)/.env.runtime"
+if [ -f "$RUNTIME_ENV" ]; then
+    source "$RUNTIME_ENV"
+fi
+
 # Backend and Ollama URLs
 BACKEND_URL="${BACKEND_URL:-http://localhost:5405}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"

@@ -1,22 +1,10 @@
-# FastAPI and server
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-
-# Data validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
-
-# HTTP client for Ollama
-httpx==0.25.2
-
-# Retry logic for resilience
-tenacity==8.2.3
-
-# Environment variables
-python-dotenv==1.0.0
-
-# Database
-sqlalchemy[asyncio]==2.0.23
-asyncpg==0.29.0
-psycopg2-binary==2.9.9  # For Alembic migrations (sync)
-alembic==1.13.0
+langchain-community==0.3.12
+langchain-core==0.3.63
+langchain-ollama==0.2.0
+langchain-text-splitters==0.3.8
+langchain==0.3.13
+langgraph-checkpoint==2.1.2
+langgraph-sdk==0.1.74
+langgraph==0.2.60
+langsmith==0.2.7
+ollama==0.6.1

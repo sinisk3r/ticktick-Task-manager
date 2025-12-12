@@ -479,5 +479,10 @@ Remember:
 - The goal is to have feedback driven execution that works at speed to deliver quick value to users
 
 ## Remediation Log (Qwen3 / Ollama)
-- Issue: Qwen3 returned empty `content` while JSON landed in `thinking` when `format:"json"` was used.
-- Fix: Send requests with `think:false` (keep `format:"json"`); fallback to `thinking` only if ever returned.
+- **Issue 1:** Qwen3 returned empty `content` while JSON landed in `thinking` when `format:"json"` was used.
+  - **Fix:** Send requests with `think:false` (keep `format:"json"`); fallback to `thinking` only if ever returned.
+- **Issue 2:** qwen3:4b echoed back complex JSON prompts instead of generating tool plans (Dec 12, 2025)
+  - **Root Cause:** Small model treats nested JSON input as schema to copy, not instructions
+  - **Fix:** Upgraded to qwen3:8b which handles complex JSON correctly
+  - **Config:** `OLLAMA_MODEL=qwen3:8b` in `backend/.env`
+  - **Trade-off:** ~50% slower but fully functional for tool calling
