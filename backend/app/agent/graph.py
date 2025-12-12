@@ -36,7 +36,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.llm_factory import get_llm
+from app.agent.llm_factory import get_llm, get_llm_for_user
 from app.agent.tools import (
     fetch_tasks,
     fetch_task,
@@ -98,7 +98,7 @@ SYSTEM_MESSAGE = """You are Context, an agentic task copilot designed to help us
 # -----------------------------------------------------------------------------
 
 
-def create_agent(
+async def create_agent(
     user_id: int,
     db: AsyncSession,
     llm: Optional[BaseChatModel] = None,
@@ -169,11 +169,11 @@ def create_agent(
     if db is None:
         raise ValueError("Database session (db) cannot be None")
 
-    # Get LLM instance (use provided or create from factory)
+    # Get LLM instance (use provided or create from user settings)
     if llm is None:
         try:
-            llm = get_llm()
-            logger.info(f"Created LLM instance for agent (user_id={user_id})")
+            llm = await get_llm_for_user(user_id=user_id, db=db)
+            logger.info(f"Created LLM instance from user settings (user_id={user_id})")
         except Exception as e:
             logger.error(f"Failed to create LLM instance: {e}")
             raise RuntimeError(f"LLM initialization failed: {e}") from e

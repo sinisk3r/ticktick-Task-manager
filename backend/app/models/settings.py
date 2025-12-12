@@ -1,7 +1,7 @@
 """
 User settings model for LLM provider configuration.
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from enum import Enum
@@ -11,9 +11,10 @@ from app.core.database import Base
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OLLAMA = "ollama"
-    GEMINI = "gemini"
     OPENROUTER = "openrouter"
-    ANTHROPIC = "anthropic"  # For future iterations
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    GEMINI = "gemini"  # For future iterations
 
 
 class Settings(Base):
@@ -27,15 +28,13 @@ class Settings(Base):
     # Foreign Key
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
 
-    # LLM Configuration
+    # LLM Configuration - Dynamic Runtime Configuration
     llm_provider = Column(SQLEnum(LLMProvider), default=LLMProvider.OLLAMA, nullable=False)
-    ollama_url = Column(String(500), default="http://localhost:11434", nullable=True)
-    ollama_model = Column(String(255), default="qwen3:4b", nullable=True)
-
-    # Future provider settings (Iteration 3)
-    gemini_api_key = Column(String(500), nullable=True)
-    openrouter_api_key = Column(String(500), nullable=True)
-    openrouter_model = Column(String(255), nullable=True)
+    llm_model = Column(String(500), nullable=True)  # Model name for current provider
+    llm_api_key = Column(String(500), nullable=True)  # API key for current provider
+    llm_base_url = Column(String(500), nullable=True)  # Base URL (for Ollama or custom endpoints)
+    llm_temperature = Column(Float, default=0.2, nullable=True)
+    llm_max_tokens = Column(Integer, default=1000, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -19,11 +19,11 @@ class SettingsResponse(BaseModel):
     id: int
     user_id: int
     llm_provider: LLMProvider
-    ollama_url: Optional[str]
-    ollama_model: Optional[str]
-    gemini_api_key: Optional[str]
-    openrouter_api_key: Optional[str]
-    openrouter_model: Optional[str]
+    llm_model: Optional[str]
+    llm_api_key: Optional[str]  # Masked in response
+    llm_base_url: Optional[str]
+    llm_temperature: Optional[float]
+    llm_max_tokens: Optional[int]
 
     class Config:
         from_attributes = True
@@ -31,12 +31,12 @@ class SettingsResponse(BaseModel):
             "example": {
                 "id": 1,
                 "user_id": 1,
-                "llm_provider": "ollama",
-                "ollama_url": "http://localhost:11434",
-                "ollama_model": "qwen3:4b",
-                "gemini_api_key": None,
-                "openrouter_api_key": None,
-                "openrouter_model": None
+                "llm_provider": "openrouter",
+                "llm_model": "nex-agi/deepseek-v3.1-nex-n1:free",
+                "llm_api_key": "sk-or-***",
+                "llm_base_url": None,
+                "llm_temperature": 0.2,
+                "llm_max_tokens": 1000
             }
         }
 
@@ -44,18 +44,20 @@ class SettingsResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     """Request schema for updating user settings."""
     llm_provider: Optional[LLMProvider] = None
-    ollama_url: Optional[str] = Field(None, max_length=500)
-    ollama_model: Optional[str] = Field(None, max_length=255)
-    gemini_api_key: Optional[str] = Field(None, max_length=500)
-    openrouter_api_key: Optional[str] = Field(None, max_length=500)
-    openrouter_model: Optional[str] = Field(None, max_length=255)
+    llm_model: Optional[str] = Field(None, max_length=500)
+    llm_api_key: Optional[str] = Field(None, max_length=500)
+    llm_base_url: Optional[str] = Field(None, max_length=500)
+    llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
+    llm_max_tokens: Optional[int] = Field(None, ge=1, le=100000)
 
     class Config:
         json_schema_extra = {
             "example": {
-                "llm_provider": "ollama",
-                "ollama_url": "http://192.168.1.100:11434",
-                "ollama_model": "llama3:8b"
+                "llm_provider": "openrouter",
+                "llm_model": "nex-agi/deepseek-v3.1-nex-n1:free",
+                "llm_api_key": "sk-or-v1-xxx",
+                "llm_temperature": 0.2,
+                "llm_max_tokens": 1000
             }
         }
 
@@ -91,11 +93,11 @@ async def get_settings(
         id=0,  # Indicates this is not persisted
         user_id=user_id,
         llm_provider=LLMProvider.OLLAMA,
-        ollama_url="http://localhost:11434",
-        ollama_model="qwen3:4b",
-        gemini_api_key=None,
-        openrouter_api_key=None,
-        openrouter_model=None
+        llm_model="qwen3:8b",
+        llm_api_key=None,
+        llm_base_url="http://localhost:11434",
+        llm_temperature=0.2,
+        llm_max_tokens=1000
     )
 
 
@@ -141,11 +143,11 @@ async def update_settings(
         new_settings = Settings(
             user_id=user_id,
             llm_provider=update_data.get("llm_provider", LLMProvider.OLLAMA),
-            ollama_url=update_data.get("ollama_url", "http://localhost:11434"),
-            ollama_model=update_data.get("ollama_model", "qwen3:4b"),
-            gemini_api_key=update_data.get("gemini_api_key"),
-            openrouter_api_key=update_data.get("openrouter_api_key"),
-            openrouter_model=update_data.get("openrouter_model")
+            llm_model=update_data.get("llm_model", "qwen3:8b"),
+            llm_api_key=update_data.get("llm_api_key"),
+            llm_base_url=update_data.get("llm_base_url", "http://localhost:11434"),
+            llm_temperature=update_data.get("llm_temperature", 0.2),
+            llm_max_tokens=update_data.get("llm_max_tokens", 1000)
         )
 
         db.add(new_settings)

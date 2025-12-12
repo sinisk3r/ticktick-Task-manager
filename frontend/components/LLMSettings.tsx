@@ -4,513 +4,324 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle2, XCircle, Loader2, Info, Link as LinkIcon, Unlink, ExternalLink } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { CheckCircle2, XCircle, Loader2, Info } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Textarea } from "@/components/ui/textarea"
-import { API_BASE } from "@/lib/api"
+import { settingsAPI, LLMProvider, Settings, SettingsUpdate } from "@/lib/api"
 
 export function LLMSettings() {
-  const [selectedModel, setSelectedModel] = useState("qwen3:4b")
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
-  const [statusMessage, setStatusMessage] = useState<string>("")
-  const [saveMessage, setSaveMessage] = useState<string>("")
-  const [backendUrl, setBackendUrl] = useState(API_BASE)
-  const [backendUrlInput, setBackendUrlInput] = useState(API_BASE)
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
-  // TickTick state
-  const [ticktickConnected, setTicktickConnected] = useState(false)
-  const [ticktickUserId, setTicktickUserId] = useState<string | null>(null)
-  const [ticktickStatus, setTicktickStatus] = useState<"checking" | "ready">("ready")
+  const [formData, setFormData] = useState<SettingsUpdate>({
+    llm_provider: 'ollama',
+    llm_model: '',
+    llm_api_key: '',
+    llm_base_url: '',
+    llm_temperature: 0.2,
+    llm_max_tokens: 1000,
+  })
 
-  // Profile context state
-  const [peopleText, setPeopleText] = useState("")
-  const [petsText, setPetsText] = useState("")
-  const [activitiesText, setActivitiesText] = useState("")
-  const [notesText, setNotesText] = useState("")
-  const [profileMessage, setProfileMessage] = useState("")
-  const [profileLoading, setProfileLoading] = useState(false)
-  const [profileSaving, setProfileSaving] = useState(false)
+  // TODO: Get actual user ID from auth context
+  const userId = 1
 
-  const parseList = (text: string) =>
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-  const listToText = (items?: string[]) => (items && items.length ? items.join("\n") : "")
-
-  // Load settings and fetch available models on mount
+  // Load settings on mount
   useEffect(() => {
-    const savedModel = localStorage.getItem("llm_model")
-    if (savedModel) setSelectedModel(savedModel)
-
-    const savedBackendUrl = localStorage.getItem("backend_url")
-    if (savedBackendUrl) {
-      setBackendUrl(savedBackendUrl)
-      setBackendUrlInput(savedBackendUrl)
-    }
-
-    // Fetch available models and test connection
-    fetchModels()
-
-    // Check TickTick connection status
-    checkTicktickStatus()
-    // Load personal context
-    loadProfile()
+    loadSettings()
   }, [])
 
-  const checkTicktickStatus = async () => {
-    setTicktickStatus("checking")
+  const loadSettings = async () => {
     try {
-      const response = await fetch(`${backendUrl}/auth/ticktick/status`)
-      if (response.ok) {
-        const data = await response.json()
-        setTicktickConnected(data.connected)
-        setTicktickUserId(data.ticktick_user_id)
-      }
-    } catch (err) {
-      console.error("Failed to check TickTick status:", err)
-    } finally {
-      setTicktickStatus("ready")
-    }
-  }
+      setLoading(true)
+      setError(null)
+      const data = await settingsAPI.getSettings(userId)
+      setSettings(data)
 
-  const connectTicktick = () => {
-    // Redirect to backend OAuth URL
-    window.location.href = `${backendUrl}/auth/ticktick/authorize`
-  }
-
-  const disconnectTicktick = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/auth/ticktick/disconnect`, {
-        method: "POST",
+      // Populate form with loaded settings
+      setFormData({
+        llm_provider: data.llm_provider,
+        llm_model: data.llm_model || '',
+        llm_api_key: data.llm_api_key || '',
+        llm_base_url: data.llm_base_url || '',
+        llm_temperature: data.llm_temperature || 0.2,
+        llm_max_tokens: data.llm_max_tokens || 1000,
       })
-
-      if (response.ok) {
-        setTicktickConnected(false)
-        setTicktickUserId(null)
-        setSaveMessage("TickTick disconnected successfully")
-        setTimeout(() => setSaveMessage(""), 3000)
-      }
-    } catch (err) {
-      console.error("Failed to disconnect TickTick:", err)
-    }
-  }
-
-  const loadProfile = async () => {
-    setProfileLoading(true)
-    try {
-      const response = await fetch(`${backendUrl}/api/profile?user_id=1`)
-      if (response.ok) {
-        const data = await response.json()
-        setPeopleText(listToText(data.people))
-        setPetsText(listToText(data.pets))
-        setActivitiesText(listToText(data.activities))
-        setNotesText(data.notes || "")
-      }
-    } catch (err) {
-      console.error("Failed to load profile:", err)
-      setProfileMessage("Unable to load personal context")
+    } catch (err: any) {
+      setError(err.message || 'Failed to load settings')
     } finally {
-      setProfileLoading(false)
+      setLoading(false)
     }
   }
 
-  const saveProfile = async () => {
-    setProfileSaving(true)
-    setProfileMessage("")
+  const handleSave = async () => {
     try {
-      const payload = {
-        people: parseList(peopleText),
-        pets: parseList(petsText),
-        activities: parseList(activitiesText),
-        notes: notesText.trim() || null,
-      }
-      const response = await fetch(`${backendUrl}/api/profile?user_id=1`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (response.ok) {
-        setProfileMessage("Personal context saved")
-      } else {
-        setProfileMessage("Failed to save personal context")
-      }
-    } catch (err) {
-      console.error("Failed to save profile:", err)
-      setProfileMessage("Failed to save personal context")
+      setSaving(true)
+      setError(null)
+      setSuccess(false)
+
+      // Send all form data (API will handle what changed)
+      const updated = await settingsAPI.updateSettings(userId, formData)
+      setSettings(updated)
+      setSuccess(true)
+
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccess(false), 3000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to save settings')
     } finally {
-      setProfileSaving(false)
-      setTimeout(() => setProfileMessage(""), 3000)
+      setSaving(false)
     }
   }
 
-  const fetchModels = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/api/llm/models`)
-      if (response.ok) {
-        const data = await response.json()
-        setAvailableModels(data.models || [])
-        // Auto-test connection after fetching models
-        testConnection()
-      }
-    } catch (err) {
-      console.error("Failed to fetch models:", err)
-      setAvailableModels(["qwen3:4b", "qwen3:8b"]) // Fallback defaults
+  // Provider-specific configuration helpers
+  const getProviderHint = (provider: LLMProvider): string => {
+    switch (provider) {
+      case 'ollama':
+        return 'Local Ollama instance (e.g., qwen3:8b, llama3:8b)'
+      case 'openrouter':
+        return 'OpenRouter model (e.g., nex-agi/deepseek-v3.1-nex-n1:free)'
+      case 'anthropic':
+        return 'Anthropic Claude model (e.g., claude-sonnet-4)'
+      case 'openai':
+        return 'OpenAI model (e.g., gpt-4-turbo, gpt-3.5-turbo)'
+      case 'gemini':
+        return 'Google Gemini model (coming soon)'
+      default:
+        return ''
     }
   }
 
-  const testConnection = async () => {
-    setConnectionStatus("testing")
-    setStatusMessage("Testing backend connection...")
-
-    try {
-      const response = await fetch(`${backendUrl}/api/llm/health`, {
-        method: "GET",
-      })
-
-      if (!response.ok) {
-        throw new Error(`Backend returned ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.status === "ok") {
-        setConnectionStatus("connected")
-        setStatusMessage(`Connected to backend - Ollama model: ${data.model}`)
-      } else {
-        setConnectionStatus("disconnected")
-        setStatusMessage(data.message || "Backend connection failed")
-      }
-    } catch (err) {
-      setConnectionStatus("disconnected")
-      setStatusMessage(
-        err instanceof Error
-          ? `Error: ${err.message}`
-          : "Failed to connect to backend. Make sure it's running on port 8000."
-      )
-    }
+  const requiresApiKey = (provider: LLMProvider): boolean => {
+    return provider !== 'ollama'
   }
 
-  const saveBackendUrl = () => {
-    localStorage.setItem("backend_url", backendUrlInput)
-    setBackendUrl(backendUrlInput)
-    setSaveMessage(`Backend URL updated to ${backendUrlInput}`)
-
-    // Clear save message after 3 seconds
-    setTimeout(() => setSaveMessage(""), 3000)
-
-    // Reload the page to apply new backend URL
-    setTimeout(() => window.location.reload(), 1000)
+  const requiresBaseUrl = (provider: LLMProvider): boolean => {
+    return provider === 'ollama'
   }
 
-  const saveSettings = () => {
-    localStorage.setItem("llm_model", selectedModel)
-    setSaveMessage(`Settings saved! Model: ${selectedModel}`)
-
-    // Clear save message after 3 seconds
-    setTimeout(() => setSaveMessage(""), 3000)
-  }
-
-  const getStatusIcon = () => {
-    switch (connectionStatus) {
-      case "connected":
-        return <CheckCircle2 className="h-5 w-5 text-green-500" />
-      case "disconnected":
-        return <XCircle className="h-5 w-5 text-red-500" />
-      case "testing":
-        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-    }
-  }
-
-  const getStatusColor = () => {
-    switch (connectionStatus) {
-      case "connected":
-        return "border-green-200 bg-green-100 dark:border-green-700 dark:bg-green-900/50"
-      case "disconnected":
-        return "border-red-200 bg-red-100 dark:border-red-700 dark:bg-red-900/50"
-      case "testing":
-        return "border-blue-200 bg-blue-100 dark:border-blue-700 dark:bg-blue-900/50"
-    }
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center p-12">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading settings...
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Backend & LLM Settings</CardTitle>
+          <CardTitle>LLM Provider Configuration</CardTitle>
           <CardDescription>
-            Configure your Ollama model for task analysis
+            Configure your AI model preferences for the task copilot. Settings are applied immediately.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Backend URL</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={backendUrlInput}
-                  onChange={(e) => setBackendUrlInput(e.target.value)}
-                  className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="http://localhost:5407"
-                />
-                <Button onClick={saveBackendUrl} variant="outline" size="sm">
-                  Update
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Current: <code className="text-xs">{backendUrl}</code>
-              </p>
-            </div>
+          {error && (
+            <Alert className="border-red-200 bg-red-50 dark:border-red-700 dark:bg-red-900/20">
+              <XCircle className="h-4 w-4 text-red-500" />
+              <AlertDescription className="text-red-600 dark:text-red-400">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ollama Model</label>
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableModels.map((model) => (
-                    <SelectItem key={model} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                qwen3:4b is faster, qwen3:8b is more accurate
-              </p>
-            </div>
+          {success && (
+            <Alert className="border-green-200 bg-green-50 dark:border-green-700 dark:bg-green-900/20">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <AlertDescription className="text-green-600 dark:text-green-400">
+                Settings saved successfully! Changes will apply to all new requests.
+              </AlertDescription>
+            </Alert>
+          )}
 
-            <div className="flex gap-3">
-              <Button onClick={testConnection} variant="outline" className="flex-1">
-                {connectionStatus === "testing" ? "Testing..." : "Test Connection"}
-              </Button>
-              <Button onClick={saveSettings} className="flex-1">
-                Save Settings
-              </Button>
-            </div>
-
-            {saveMessage && (
-              <Alert className="border-green-200 bg-green-100 dark:border-green-700 dark:bg-green-900/50">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                <AlertDescription className="text-green-200">
-                  {saveMessage}
-                </AlertDescription>
-              </Alert>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className={getStatusColor()}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {getStatusIcon()}
-            Connection Status
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          {/* Provider Selection */}
           <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Status:</span>
-              <span className="text-sm capitalize">{connectionStatus}</span>
-            </div>
-            {statusMessage && (
-              <div className="text-sm text-muted-foreground mt-2">
-                {statusMessage}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>TickTick Integration</CardTitle>
-          <CardDescription>
-            Connect your TickTick account to sync and analyze your tasks
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-md border border-border">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-background rounded-full">
-                {ticktickStatus === "checking" ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-                ) : ticktickConnected ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-500" />
-                ) : (
-                  <XCircle className="h-5 w-5 text-muted-foreground" />
-                )}
-              </div>
-              <div>
-                <p className="text-sm font-medium">
-                  {ticktickConnected ? "Connected to TickTick" : "Not Connected"}
-                </p>
-                {ticktickUserId && (
-                  <p className="text-xs text-muted-foreground">
-                    User ID: {ticktickUserId}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {ticktickConnected ? (
-                <Button
-                  onClick={disconnectTicktick}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2"
-                >
-                  <Unlink className="h-4 w-4" />
-                  Disconnect
-                </Button>
-              ) : (
-                <Button
-                  onClick={connectTicktick}
-                  size="sm"
-                  className="flex items-center gap-2"
-                  disabled={ticktickStatus === "checking"}
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  Connect TickTick
-                </Button>
-              )}
-            </div>
+            <Label htmlFor="provider">LLM Provider</Label>
+            <Select
+              value={formData.llm_provider}
+              onValueChange={(value: LLMProvider) =>
+                setFormData({ ...formData, llm_provider: value })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ollama">Ollama (Local)</SelectItem>
+                <SelectItem value="openrouter">OpenRouter</SelectItem>
+                <SelectItem value="anthropic">Anthropic Claude</SelectItem>
+                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="gemini" disabled>Gemini (Coming Soon)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Choose which AI provider to use for task analysis and chat
+            </p>
           </div>
 
-          <Alert className="border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20">
-            <Info className="h-4 w-4 text-blue-400" />
-            <AlertDescription className="text-sm text-muted-foreground">
-              After connecting, you can sync your TickTick tasks from the Analyze tab.
-              All tasks will be automatically analyzed by AI.
-            </AlertDescription>
-          </Alert>
-
-          <div className="space-y-3 p-3 bg-muted/30 rounded-md border border-border">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Info className="h-4 w-4 flex-shrink-0" />
-              <span>Manage your TickTick OAuth apps:</span>
-              <a
-                href="https://developer.ticktick.com/manage"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 inline-flex items-center gap-1 hover:underline"
-              >
-                Developer Console
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Required Redirect URI:</p>
-              <div className="flex items-center gap-2 p-2 bg-background rounded border border-border">
-                <code className="text-xs text-foreground flex-1">
-                  {backendUrl}/auth/ticktick/callback
-                </code>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${backendUrl}/auth/ticktick/callback`)
-                    setSaveMessage("Redirect URI copied to clipboard!")
-                    setTimeout(() => setSaveMessage(""), 2000)
-                  }}
-                >
-                  Copy
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Add this exact URI to your TickTick OAuth app settings
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Personal Context</CardTitle>
-          <CardDescription>
-            Share concise details to help the LLM personalize analysis (kept short for 4B models)
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">People & roles</label>
-              <Textarea
-                placeholder={"Sam (manager)\nAlex (partner)"}
-                value={peopleText}
-                onChange={(e) => setPeopleText(e.target.value)}
-                rows={4}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Pets</label>
-              <Textarea
-                placeholder={"Ari (cat)"}
-                value={petsText}
-                onChange={(e) => setPetsText(e.target.value)}
-                rows={4}
-              />
-            </div>
-          </div>
-
+          {/* Model Name */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Activities</label>
-            <Textarea
-              placeholder={"Climbing Tue/Thu\nYoga Sat"}
-              value={activitiesText}
-              onChange={(e) => setActivitiesText(e.target.value)}
-              rows={3}
+            <Label htmlFor="model">Model Name</Label>
+            <Input
+              id="model"
+              value={formData.llm_model || ''}
+              onChange={(e) =>
+                setFormData({ ...formData, llm_model: e.target.value })
+              }
+              placeholder={getProviderHint(formData.llm_provider as LLMProvider)}
             />
+            <p className="text-xs text-muted-foreground">
+              {getProviderHint(formData.llm_provider as LLMProvider)}
+            </p>
           </div>
 
+          {/* API Key (for cloud providers) */}
+          {requiresApiKey(formData.llm_provider as LLMProvider) && (
+            <div className="space-y-2">
+              <Label htmlFor="api-key">API Key</Label>
+              <Input
+                id="api-key"
+                type="password"
+                value={formData.llm_api_key || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, llm_api_key: e.target.value })
+                }
+                placeholder="sk-..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Your API key is encrypted and stored securely
+              </p>
+            </div>
+          )}
+
+          {/* Base URL (for Ollama) */}
+          {requiresBaseUrl(formData.llm_provider as LLMProvider) && (
+            <div className="space-y-2">
+              <Label htmlFor="base-url">Base URL</Label>
+              <Input
+                id="base-url"
+                value={formData.llm_base_url || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, llm_base_url: e.target.value })
+                }
+                placeholder="http://localhost:11434"
+              />
+              <p className="text-xs text-muted-foreground">
+                URL of your Ollama instance
+              </p>
+            </div>
+          )}
+
+          {/* Temperature */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Notes</label>
-            <Textarea
-              placeholder="Morning focus time, prefers async updates"
-              value={notesText}
-              onChange={(e) => setNotesText(e.target.value)}
-              rows={3}
+            <Label htmlFor="temperature">
+              Temperature: {formData.llm_temperature?.toFixed(1)}
+            </Label>
+            <Input
+              id="temperature"
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={formData.llm_temperature || 0.2}
+              onChange={(e) =>
+                setFormData({ ...formData, llm_temperature: parseFloat(e.target.value) })
+              }
             />
+            <p className="text-xs text-muted-foreground">
+              Lower values (0.0-0.5) for focused responses, higher values (0.5-2.0) for creative responses
+            </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button onClick={saveProfile} disabled={profileSaving || profileLoading}>
-              {profileSaving ? "Saving..." : "Save personal context"}
+          {/* Max Tokens */}
+          <div className="space-y-2">
+            <Label htmlFor="max-tokens">Max Tokens</Label>
+            <Input
+              id="max-tokens"
+              type="number"
+              min="1"
+              max="100000"
+              value={formData.llm_max_tokens || 1000}
+              onChange={(e) =>
+                setFormData({ ...formData, llm_max_tokens: parseInt(e.target.value) })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Maximum number of tokens to generate per response
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4">
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
             </Button>
-            {profileMessage && <span className="text-sm text-gray-300">{profileMessage}</span>}
-            {profileLoading && <span className="text-xs text-gray-400">Loading...</span>}
+            <Button
+              onClick={loadSettings}
+              variant="outline"
+              disabled={loading || saving}
+            >
+              Reset
+            </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            We store this securely and send a compressed summary with each analysis. Keep it brief for best results.
-          </p>
         </CardContent>
       </Card>
 
+      {/* Info Section */}
       <Card className="border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Info className="h-5 w-5 text-blue-400" />
-            Architecture Overview
+            Quick Start Guide
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground space-y-2">
-            <p>Your requests flow through these components:</p>
-            <ol className="list-decimal list-inside space-y-1 ml-2">
-              <li>Frontend (Next.js) sends task to backend</li>
-              <li>Backend (FastAPI) receives request</li>
-              <li>Backend connects to Ollama for LLM analysis</li>
-              <li>Results return to frontend for display</li>
-            </ol>
-            <p className="mt-3 text-xs">
-              The frontend never communicates directly with Ollama - all AI requests go through your backend for security and flexibility.
-            </p>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <div>
+              <strong className="text-foreground">Ollama (Free):</strong>
+              <p className="text-xs mt-1">Run AI models locally. Install from{' '}
+                <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                  ollama.ai
+                </a>
+              </p>
+            </div>
+            <div>
+              <strong className="text-foreground">OpenRouter:</strong>
+              <p className="text-xs mt-1">Access multiple AI models with one API key. Sign up at{' '}
+                <a href="https://openrouter.ai" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                  openrouter.ai
+                </a>
+              </p>
+            </div>
+            <div>
+              <strong className="text-foreground">Anthropic Claude:</strong>
+              <p className="text-xs mt-1">Use Claude models directly. Get API key from{' '}
+                <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                  console.anthropic.com
+                </a>
+              </p>
+            </div>
+            <div>
+              <strong className="text-foreground">OpenAI:</strong>
+              <p className="text-xs mt-1">Access GPT models. Get API key from{' '}
+                <a href="https://platform.openai.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                  platform.openai.com
+                </a>
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

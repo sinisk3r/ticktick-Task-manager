@@ -58,10 +58,10 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
         try:
             # Create LangGraph agent with conversation memory
             # The create_agent function handles:
-            # - LLM provider initialization (via get_llm)
+            # - LLM provider initialization (via get_llm_for_user with user settings)
             # - Tool binding with user_id and db injection
             # - MemorySaver checkpointer for conversation history
-            agent = create_agent(user_id=payload.user_id, db=db)
+            agent = await create_agent(user_id=payload.user_id, db=db)
 
             # Build conversation history from frontend
             messages = []
