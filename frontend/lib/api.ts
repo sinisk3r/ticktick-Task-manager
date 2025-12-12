@@ -153,41 +153,149 @@ class APIClient {
 export const api = new APIClient();
 
 // ============================================================================
-// Settings API
+// LLM Configuration API
 // ============================================================================
 
 export type LLMProvider = 'ollama' | 'openrouter' | 'anthropic' | 'openai' | 'gemini';
 
+export interface LLMConfiguration {
+  id: number;
+  user_id: number;
+  name: string;
+  provider: LLMProvider;
+  model: string;
+  api_key?: string | null; // Masked in responses
+  base_url?: string | null;
+  temperature: number;
+  max_tokens: number;
+  is_default: boolean;
+  connection_status: string;
+  connection_error?: string | null;
+  last_tested_at?: string | null;
+  display_name: string;
+  requires_api_key: boolean;
+  requires_base_url: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LLMConfigurationCreate {
+  name: string;
+  provider: LLMProvider;
+  model: string;
+  api_key?: string;
+  base_url?: string;
+  temperature?: number;
+  max_tokens?: number;
+  is_default?: boolean;
+}
+
+export interface LLMConfigurationUpdate {
+  name?: string;
+  provider?: LLMProvider;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+  temperature?: number;
+  max_tokens?: number;
+  is_default?: boolean;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  error?: string;
+  response_time_ms?: number;
+  model_info?: Record<string, any>;
+}
+
+export const llmConfigAPI = {
+  /**
+   * List all LLM configurations for a user
+   */
+  async listConfigurations(userId: number): Promise<LLMConfiguration[]> {
+    return api.get(`/api/llm-configurations?user_id=${userId}`);
+  },
+
+  /**
+   * Create a new LLM configuration
+   */
+  async createConfiguration(userId: number, config: LLMConfigurationCreate): Promise<LLMConfiguration> {
+    return api.post(`/api/llm-configurations?user_id=${userId}`, config);
+  },
+
+  /**
+   * Get a specific LLM configuration
+   */
+  async getConfiguration(configId: number, userId: number): Promise<LLMConfiguration> {
+    return api.get(`/api/llm-configurations/${configId}?user_id=${userId}`);
+  },
+
+  /**
+   * Update an LLM configuration
+   */
+  async updateConfiguration(configId: number, userId: number, config: LLMConfigurationUpdate): Promise<LLMConfiguration> {
+    return api.put(`/api/llm-configurations/${configId}?user_id=${userId}`, config);
+  },
+
+  /**
+   * Delete an LLM configuration
+   */
+  async deleteConfiguration(configId: number, userId: number): Promise<{ message: string }> {
+    return api.delete(`/api/llm-configurations/${configId}?user_id=${userId}`);
+  },
+
+  /**
+   * Test connection to an LLM configuration
+   */
+  async testConnection(configId: number, userId: number): Promise<ConnectionTestResult> {
+    return api.post(`/api/llm-configurations/${configId}/test?user_id=${userId}`);
+  },
+
+  /**
+   * Set a configuration as active
+   */
+  async setActiveConfiguration(configId: number, userId: number): Promise<{ message: string; config_id: number }> {
+    return api.post(`/api/llm-configurations/${configId}/set-active?user_id=${userId}`);
+  },
+};
+
+// ============================================================================
+// Settings API (Updated)
+// ============================================================================
+
+export interface ActiveLLMConfig {
+  id: number;
+  name: string;
+  provider: LLMProvider;
+  model: string;
+  base_url?: string | null;
+  temperature: number;
+  max_tokens: number;
+  connection_status: string;
+  display_name: string;
+}
+
 export interface Settings {
   id: number;
   user_id: number;
-  llm_provider: LLMProvider;
-  llm_model: string | null;
-  llm_api_key: string | null;
-  llm_base_url: string | null;
-  llm_temperature: number | null;
-  llm_max_tokens: number | null;
+  active_llm_config_id?: number | null;
+  active_llm_config?: ActiveLLMConfig | null;
 }
 
 export interface SettingsUpdate {
-  llm_provider?: LLMProvider;
-  llm_model?: string;
-  llm_api_key?: string;
-  llm_base_url?: string;
-  llm_temperature?: number;
-  llm_max_tokens?: number;
+  active_llm_config_id?: number | null;
 }
 
 export const settingsAPI = {
   /**
-   * Get user settings for LLM configuration
+   * Get user settings including active LLM configuration
    */
   async getSettings(userId: number): Promise<Settings> {
     return api.get(`/api/settings?user_id=${userId}`);
   },
 
   /**
-   * Update user settings for LLM configuration
+   * Update user settings (currently only active LLM config)
    */
   async updateSettings(userId: number, settings: SettingsUpdate): Promise<Settings> {
     return api.put(`/api/settings?user_id=${userId}`, settings);

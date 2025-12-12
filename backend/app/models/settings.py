@@ -1,24 +1,18 @@
 """
-User settings model for LLM provider configuration.
+User settings model - now references saved LLM configurations.
 """
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum as SQLEnum
+from sqlalchemy import Column, Integer, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from enum import Enum
 from app.core.database import Base
 
 
-class LLMProvider(str, Enum):
-    """Supported LLM providers."""
-    OLLAMA = "ollama"
-    OPENROUTER = "openrouter"
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    GEMINI = "gemini"  # For future iterations
-
-
 class Settings(Base):
-    """User-specific settings for LLM configuration."""
+    """
+    User-specific settings.
+    
+    Now references a saved LLM configuration instead of storing provider details directly.
+    """
 
     __tablename__ = "settings"
 
@@ -28,13 +22,8 @@ class Settings(Base):
     # Foreign Key
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
 
-    # LLM Configuration - Dynamic Runtime Configuration
-    llm_provider = Column(SQLEnum(LLMProvider), default=LLMProvider.OLLAMA, nullable=False)
-    llm_model = Column(String(500), nullable=True)  # Model name for current provider
-    llm_api_key = Column(String(500), nullable=True)  # API key for current provider
-    llm_base_url = Column(String(500), nullable=True)  # Base URL (for Ollama or custom endpoints)
-    llm_temperature = Column(Float, default=0.2, nullable=True)
-    llm_max_tokens = Column(Integer, default=1000, nullable=True)
+    # Active LLM Configuration
+    active_llm_config_id = Column(Integer, ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -42,6 +31,7 @@ class Settings(Base):
 
     # Relationships
     user = relationship("User", back_populates="settings")
+    active_llm_config = relationship("LLMConfiguration", foreign_keys=[active_llm_config_id])
 
     def __repr__(self):
-        return f"<Settings(user_id={self.user_id}, provider={self.llm_provider})>"
+        return f"<Settings(user_id={self.user_id}, active_config_id={self.active_llm_config_id})>"

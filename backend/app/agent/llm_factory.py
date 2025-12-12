@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm_config import LLMSettings
-from app.models.settings import Settings as UserSettings, LLMProvider
+from app.models.settings import Settings as UserSettings
+from app.models.llm_configuration import LLMProvider
 
 
 def get_llm_provider(settings: LLMSettings) -> BaseChatModel:

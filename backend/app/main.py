@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.services import OllamaService
-from app.api import tasks, settings, auth, profile, projects, chat, agent
+from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations
 
 # Load environment variables
 load_dotenv()
@@ -77,6 +77,7 @@ app.include_router(profile.router)
 app.include_router(projects.router)
 app.include_router(chat.router)
 app.include_router(agent.router)
+app.include_router(llm_configurations.router)
 
 
 # Request/Response models
