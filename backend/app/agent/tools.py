@@ -517,61 +517,8 @@ async def quick_analyze_task(
 
 
 # -----------------------------------------------------------------------------
-# Backward compatibility layer for Phase 3 migration
-# -----------------------------------------------------------------------------
-# NOTE: TOOL_REGISTRY is kept temporarily for backward compatibility with
-# dispatcher.py. This will be removed in Phase 3 when dispatcher is migrated
-# to use LangChain's native tool discovery.
-
-TOOL_REGISTRY = {
-    "fetch_tasks": {
-        "model": None,  # No longer needed - schema auto-generated
-        "callable": fetch_tasks,
-        "description": fetch_tasks.description,
-        "requires_confirmation": False,
-    },
-    "fetch_task": {
-        "model": None,
-        "callable": fetch_task,
-        "description": fetch_task.description,
-        "requires_confirmation": False,
-    },
-    "create_task": {
-        "model": None,
-        "callable": create_task,
-        "description": create_task.description,
-        "requires_confirmation": False,
-    },
-    "update_task": {
-        "model": None,
-        "callable": update_task,
-        "description": update_task.description,
-        "requires_confirmation": False,
-    },
-    "complete_task": {
-        "model": None,
-        "callable": complete_task,
-        "description": complete_task.description,
-        "requires_confirmation": False,
-    },
-    "delete_task": {
-        "model": None,
-        "callable": delete_task,
-        "description": delete_task.description,
-        "requires_confirmation": False,
-    },
-    "quick_analyze_task": {
-        "model": None,
-        "callable": quick_analyze_task,
-        "description": quick_analyze_task.description,
-        "requires_confirmation": False,
-    },
-}
-
-
 # Export all tools for discovery
 __all__ = [
-    "TOOL_REGISTRY",  # Temporary - will be removed in Phase 3
     "fetch_tasks",
     "fetch_task",
     "create_task",
