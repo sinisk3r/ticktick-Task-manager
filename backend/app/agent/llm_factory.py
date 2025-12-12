@@ -3,12 +3,14 @@
 from typing import Union, Optional
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.llm_config import LLMSettings
+from app.core.llm_config import LLMSettings, get_ca_bundle_path
 from app.models.settings import Settings as UserSettings
 from app.models.llm_configuration import LLMProvider
 
@@ -53,12 +55,19 @@ def get_llm_provider(settings: LLMSettings) -> BaseChatModel:
         if not settings.api_key:
             raise ValueError("OpenRouter provider requires LLM_API_KEY environment variable")
 
+        ca_path = get_ca_bundle_path()
+        # LangChain expects httpx.Client for http_client and httpx.AsyncClient for
+        # http_async_client. Use the async variant so OpenRouter calls work with
+        # async LangChain stack and honor the corporate/Zscaler CA bundle.
+        http_async_client = httpx.AsyncClient(verify=ca_path, trust_env=True)
+
         return ChatOpenAI(
             model=settings.model,
             base_url="https://openrouter.ai/api/v1",
             api_key=settings.api_key,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens,
+            http_async_client=http_async_client,
         )
 
     elif settings.provider == "anthropic":
@@ -106,26 +115,30 @@ async def get_llm_for_user(user_id: int, db: AsyncSession) -> BaseChatModel:
     >>> llm = await get_llm_for_user(user_id=1, db=db)
     >>> response = await llm.ainvoke("Create a task")
     """
-    # Fetch user settings from database
+    # Fetch user settings and include the active LLM configuration
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user_id)
+        select(UserSettings)
+        .options(selectinload(UserSettings.active_llm_config))
+        .where(UserSettings.user_id == user_id)
     )
     user_settings = result.scalar_one_or_none()
 
-    # If no user settings, fall back to environment defaults
-    if not user_settings:
+    # If no user settings or no active LLM config, fall back to environment defaults
+    if not user_settings or not user_settings.active_llm_config:
         from app.core.llm_config import get_llm_settings
         env_settings = get_llm_settings()
         return get_llm_provider(env_settings)
 
-    # Convert database settings to LLMSettings
+    active_config = user_settings.active_llm_config
+
+    # Convert active LLM configuration to LLMSettings
     llm_settings = LLMSettings(
-        provider=user_settings.llm_provider.value,
-        model=user_settings.llm_model or "qwen3:8b",
-        api_key=user_settings.llm_api_key,
-        base_url=user_settings.llm_base_url,
-        temperature=user_settings.llm_temperature or 0.2,
-        max_tokens=user_settings.llm_max_tokens or 1000,
+        provider=active_config.provider.value,
+        model=active_config.model,
+        api_key=active_config.api_key,
+        base_url=active_config.base_url,
+        temperature=active_config.temperature or 0.2,
+        max_tokens=active_config.max_tokens or 1000,
     )
 
     return get_llm_provider(llm_settings)

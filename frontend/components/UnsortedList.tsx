@@ -90,7 +90,7 @@ export function UnsortedList() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-gray-400">Loading unsorted tasks...</div>
+        <div className="text-muted-foreground">Loading unsorted tasks...</div>
       </div>
     );
   }
@@ -98,7 +98,7 @@ export function UnsortedList() {
   if (error) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-red-400">
+        <div className="text-destructive">
           Error loading tasks: {error.message}
         </div>
       </div>
@@ -108,14 +108,14 @@ export function UnsortedList() {
   return (
     <div className="unsorted-container p-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-white">
+        <h2 className="text-2xl font-bold text-foreground">
           Unsorted Tasks ({tasks.length})
         </h2>
         {tasks.length > 0 && (
           <button
             onClick={handleAnalyzeAll}
             disabled={analyzing}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {analyzing ? "⏳ Analyzing..." : "⚡ Analyze All"}
           </button>
@@ -142,7 +142,7 @@ export function UnsortedList() {
             ))}
           </AnimatePresence>
         ) : (
-          <div className="text-gray-500 text-center py-8 bg-gray-800 rounded-lg border border-gray-700">
+          <div className="text-muted-foreground text-center py-8 bg-card rounded-lg border border-border shadow-sm">
             No unsorted tasks. All tasks are organized!
           </div>
         )}

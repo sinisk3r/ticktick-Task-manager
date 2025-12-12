@@ -1,10 +1,15 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-# Set SSL certificate paths BEFORE any other imports that use SSL
+# Set SSL certificate paths BEFORE any other imports that use SSL.
+# Prefer repo-level combined bundle (for corp roots like Zscaler); fall back to certifi.
 import certifi
-os.environ['SSL_CERT_FILE'] = certifi.where()
-os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+_repo_root = Path(__file__).resolve().parents[1]
+_combined_ca = _repo_root / "certs" / "combined.pem"
+_ca_path = _combined_ca if _combined_ca.exists() else Path(certifi.where())
+os.environ["SSL_CERT_FILE"] = str(_ca_path)
+os.environ["REQUESTS_CA_BUNDLE"] = str(_ca_path)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

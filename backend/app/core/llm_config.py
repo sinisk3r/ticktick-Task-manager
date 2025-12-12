@@ -1,7 +1,24 @@
 """LLM Configuration for Provider-Agnostic LLM Access"""
 
+import os
+from pathlib import Path
 from typing import Literal, Optional
 from pydantic_settings import BaseSettings
+import certifi
+
+# Ensure HTTP clients (httpx/openai/langchain) have a CA bundle available.
+# Prefer a repo-level combined bundle (for corporate roots like Zscaler); fall back to certifi.
+_repo_root = Path(__file__).resolve().parents[2]
+_combined_ca = _repo_root / "certs" / "combined.pem"
+if _combined_ca.exists():
+    os.environ.setdefault("SSL_CERT_FILE", str(_combined_ca))
+else:
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
+
+def get_ca_bundle_path() -> str:
+    """Return the CA bundle path in use for HTTP clients."""
+    return os.environ.get("SSL_CERT_FILE", certifi.where())
 
 
 class LLMSettings(BaseSettings):

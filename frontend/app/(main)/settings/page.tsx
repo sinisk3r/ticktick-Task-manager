@@ -3,6 +3,7 @@
 import { LLMSettings } from "@/components/LLMSettings";
 import { TickTickSettings } from "@/components/TickTickSettings";
 import { PersonalizationSettings } from "@/components/PersonalizationSettings";
+import { DeveloperSettings } from "@/components/DeveloperSettings";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
@@ -18,11 +19,12 @@ export default function SettingsPage() {
             </div>
 
             <Tabs defaultValue="llm" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="llm">LLM Provider</TabsTrigger>
                     <TabsTrigger value="ticktick">TickTick</TabsTrigger>
                     <TabsTrigger value="personalization">Personalization</TabsTrigger>
                     <TabsTrigger value="appearance">Appearance</TabsTrigger>
+                    <TabsTrigger value="developer">Developer</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="llm" className="space-y-4 mt-6">
@@ -50,6 +52,10 @@ export default function SettingsPage() {
                             <ThemeToggle />
                         </div>
                     </Card>
+                </TabsContent>
+
+                <TabsContent value="developer" className="space-y-4 mt-6">
+                    <DeveloperSettings />
                 </TabsContent>
             </Tabs>
         </div>

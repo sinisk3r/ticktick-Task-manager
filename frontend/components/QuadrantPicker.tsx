@@ -21,16 +21,15 @@ export function QuadrantPicker({ onSelect, onCancel }: QuadrantPickerProps) {
   };
 
   return (
-    <div className="mt-3 p-3 bg-gray-900 rounded border border-gray-700">
-      <p className="text-sm text-gray-400 mb-2">Select quadrant:</p>
+    <div className="mt-3 p-3 bg-popover rounded border border-border shadow-md">
+      <p className="text-sm text-muted-foreground mb-2">Select quadrant:</p>
       <div className="grid grid-cols-2 gap-2 mb-2">
         {quadrants.map((q) => (
           <button
             key={q.id}
             onClick={() => onSelect(q.id)}
-            className={`px-3 py-2 text-sm rounded transition-colors ${
-              colorClasses[q.color as keyof typeof colorClasses]
-            }`}
+            className={`px-3 py-2 text-sm rounded transition-colors ${colorClasses[q.color as keyof typeof colorClasses]
+              }`}
           >
             {q.label}
           </button>
@@ -38,7 +37,7 @@ export function QuadrantPicker({ onSelect, onCancel }: QuadrantPickerProps) {
       </div>
       <button
         onClick={onCancel}
-        className="w-full px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 transition-colors"
+        className="w-full px-3 py-1.5 bg-secondary text-secondary-foreground text-sm rounded hover:bg-secondary/80 transition-colors"
       >
         Cancel
       </button>

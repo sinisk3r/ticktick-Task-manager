@@ -2,12 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Key points to follow when working
-- Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
-
 ## Project Overview
 
-**Context** is an LLM-powered task management system that sits on top of TickTick to auto-prioritize, schedule, and protect wellbeing. It acts as an intelligent middleware layer between TickTick and the user, powered by Claude API for contextual understanding.
+**Context** is an LLM-powered task management system that sits on top of TickTick to auto-prioritize, schedule, and protect wellbeing. It acts as an intelligent middleware layer between TickTick and the user, with a configurable LLM backend (Ollama/Qwen3, OpenRouter, Claude API, OpenAI).
 
 ## Architecture
 
@@ -32,11 +29,11 @@ Frontend (Next.js) ↔ Backend (FastAPI) ↔ External APIs (TickTick, Claude, Gm
 ### Tech Stack
 
 - **Backend:** FastAPI (Python 3.11+), SQLAlchemy 2.0 (async), Alembic for migrations
-- **Database:** PostgreSQL 15+ (relational + JSONB), Redis 7 (cache + queue), ChromaDB (embeddings)
-- **LLM:** Claude Sonnet 4.5 (task analysis, email drafts, workload analysis)
-- **Background Jobs:** Celery 5 with Redis broker
-- **Frontend:** Next.js 14 (App Router), React, TypeScript, Tailwind CSS, shadcn/ui
-- **State:** SWR for server state, WebSocket for real-time updates
+- **LLM Integration:** LangChain/LangGraph with multi-provider support (Ollama/Qwen3, OpenRouter, Anthropic Claude, OpenAI)
+- **Agent System:** LangGraph-based conversational agent with tool calling (create/complete/delete/list tasks)
+- **Database:** PostgreSQL 15+ (relational + JSONB), Redis 7 (cache), Docker Compose for local dev
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui
+- **Real-time:** Server-Sent Events (SSE) for chat/agent streaming
 - **Deployment:** Railway (backend), Vercel (frontend)
 
 ## Development Commands
@@ -176,160 +173,171 @@ Results saved to `backend/test_results/` with:
 
 ## Project Structure
 
-### Backend (`backend/`)
+### Backend (`backend/app/`)
 
 ```
-app/
-├── api/              # FastAPI routes
-│   ├── auth.py       # OAuth flows (TickTick, Google)
-│   ├── tasks.py      # Task CRUD operations
-│   ├── calendar.py   # Calendar blocking
-│   ├── analytics.py  # Workload intelligence
-│   └── sync.py       # Webhook handlers
-├── services/         # Business logic layer
-│   ├── ticktick.py   # TickTick API integration
-│   ├── llm.py        # Claude API calls & prompt management
-│   ├── scheduler.py  # Calendar blocking logic
-│   ├── email.py      # Gmail draft generation
-│   └── azure.py      # Azure DevOps integration
-├── models/           # SQLAlchemy models
-│   ├── user.py
-│   ├── task.py
-│   ├── calendar_event.py
-│   └── sync_log.py
-├── workers/          # Celery background tasks
-│   ├── celery_app.py
-│   ├── sync_tasks.py
-│   └── analysis.py
-├── core/             # Configuration & utilities
-│   ├── config.py     # Environment variables
-│   ├── database.py   # DB session management
-│   └── security.py   # JWT, OAuth utilities
-├── prompts/          # Versioned LLM prompts
-│   ├── task_analysis_v1.txt
-│   ├── email_draft_v1.txt
-│   ├── workload_analysis_v1.txt
-│   └── weekly_review_v1.txt
-└── main.py           # FastAPI app initialization
+api/              # FastAPI routes
+├── agent.py      # Conversational agent endpoint (SSE streaming)
+├── auth.py       # OAuth flows (TickTick)
+├── tasks.py      # Task CRUD operations
+├── llm_configurations.py  # LLM provider management UI endpoints
+└── settings.py   # User settings & personalization
+
+agent/            # LangGraph-based agent system
+├── graph.py      # LangGraph workflow definition
+├── llm_factory.py # Multi-provider LLM factory
+└── tools.py      # Tool definitions (create/list/complete/delete tasks)
+
+services/         # Business logic layer
+├── ticktick.py   # TickTick API integration
+├── llm_ollama.py # Ollama/Qwen3 integration
+├── workload_calculator.py
+└── sync_service.py
+
+models/           # SQLAlchemy models
+├── user.py
+├── task.py
+├── project.py
+└── llm_configuration.py
+
+core/             # Configuration & utilities
+├── config.py     # Environment variables
+├── llm_config.py # LLM provider configuration
+└── database.py   # DB session management
+
+scripts/          # Development & testing scripts
+├── test_agent.sh            # Single agent query test
+├── run_agent_tests.sh       # Full test suite
+└── inspect_ollama.sh        # Raw Ollama debugging
 ```
 
 ### Frontend (`frontend/`)
 
 ```
-src/
-├── app/              # Next.js 13+ app directory
-│   ├── page.tsx      # Dashboard (Eisenhower matrix)
-│   ├── tasks/        # Task detail views
-│   └── settings/     # Integration configuration
-├── components/
-│   ├── TaskBoard.tsx      # Eisenhower matrix grid
-│   ├── TaskCard.tsx       # Individual task display
-│   ├── WeeklyView.tsx     # Weekly planning view
-│   ├── WorkloadChart.tsx  # Analytics charts
-│   └── EmailDraftModal.tsx # Email generation UI
-└── lib/
-    ├── api.ts        # Backend API client
-    ├── hooks.ts      # Custom React hooks
-    └── utils.ts      # Utilities
+app/              # Next.js 14 app directory
+├── (main)/       # Main authenticated app
+│   ├── matrix/   # Eisenhower matrix view
+│   ├── simple/   # Simple list view
+│   └── settings/ # LLM & user settings
+└── auth/         # Auth pages
+
+components/
+├── EisenhowerMatrix.tsx    # 2x2 quadrant grid with DnD
+├── ChatPanel.tsx           # Agent chat interface with SSE
+├── QuickAddTaskModal.tsx   # Inline task creation
+├── UnsortedList.tsx        # Tasks pending quadrant assignment
+├── LLMConfigurationManager.tsx  # Multi-provider LLM config
+└── ui/                     # shadcn/ui components
+
+lib/
+├── api.ts              # Backend API client
+├── useAgentStream.ts   # SSE streaming hook for agent
+└── useChatStream.ts    # Chat streaming utilities
 ```
 
 ## Core Concepts
 
-### Task Analysis (LLM Service)
+### LLM Provider System
 
-The `LLMService` (`backend/app/services/llm.py`) is central to the system:
+Multi-provider LLM support configured via environment variables (`backend/app/core/llm_config.py`):
 
-```python
-async def analyze_task(task_description: str) -> TaskAnalysis:
-    """
-    Returns:
-    - urgency_score: 1-10
-    - importance_score: 1-10
-    - effort_hours: estimated hours
-    - blockers: list of potential blockers
-    - tags: suggested tags
-    - eisenhower_quadrant: Q1/Q2/Q3/Q4
-    """
+```bash
+# Choose provider: ollama | openrouter | anthropic | openai
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen3:8b
+LLM_BASE_URL=http://localhost:11434  # For Ollama
+LLM_API_KEY=sk-xxx                   # For cloud providers
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=1000
 ```
 
-**Quadrant Assignment:**
+**Runtime Switching:** Users can create saved LLM configurations in the UI and switch between providers without restarting.
+
+### Agent System (LangGraph)
+
+The conversational agent (`backend/app/agent/graph.py`) handles task management through natural language:
+
+**Tools:**
+- `create_task` - Create new task with optional quadrant/priority
+- `list_tasks` - List tasks with filters (quadrant, status, project)
+- `complete_task` - Mark task as complete
+- `delete_task` - Delete task
+
+**Streaming:** Uses Server-Sent Events (SSE) for real-time streaming:
+- `thinking` - Model's internal reasoning (visible in debug mode)
+- `message` - User-facing response chunks
+- `tool_call` - Tool invocation with args/results
+
+### Eisenhower Quadrant Assignment
+
+Tasks are classified into 4 quadrants based on urgency/importance:
 - **Q1 (Urgent & Important):** urgency ≥ 7 AND importance ≥ 7
 - **Q2 (Not Urgent, Important):** urgency < 7 AND importance ≥ 7
 - **Q3 (Urgent, Not Important):** urgency ≥ 7 AND importance < 7
 - **Q4 (Neither):** urgency < 7 AND importance < 7
 
-**Prompts are versioned** in `backend/app/prompts/` for tracking performance over time.
+Users can manually override via drag-and-drop or quadrant picker.
 
-### Data Synchronization
+### TickTick Synchronization
 
-**Real-time Sync:**
-- TickTick webhook → `/webhooks/ticktick` → Celery task → LLM analysis → PostgreSQL → WebSocket → Frontend
+**Bi-directional Sync:**
+- Context → TickTick: Manual sync endpoint (`POST /api/sync/ticktick/manual`)
+- TickTick → Context: Webhook receiver (`POST /webhooks/ticktick`) - creates tasks in PostgreSQL
+- Changes in Context (quadrant, priority, status) push back to TickTick
 
-**Polling Fallback:**
-- Celery job runs every 5 minutes to catch missed webhooks
+**Sync Strategy:**
+- Manual trigger only (no automatic polling)
+- Tasks stored in PostgreSQL with TickTick ID mapping
+- Soft deletes supported (archive in TickTick = delete in Context)
 
-**Bi-directional:**
-- Changes in Context dashboard update TickTick via API
+### Port Management (init.sh)
 
-### Caching Strategy (Redis)
+The project uses dynamic port allocation managed by `init.sh`:
 
-```python
-# User tasks cache (5 min TTL)
-f"user:{user_id}:tasks:all"
-f"user:{user_id}:tasks:quadrant:{q}"
+**Default Ports:**
+- Backend: 5400
+- Frontend: 5401
+- PostgreSQL (Docker): 5432
+- Redis (Docker): 6379
 
-# Workload analysis (10 min TTL)
-f"user:{user_id}:workload:current"
+**Dynamic Allocation:** If default port is occupied, `init.sh` automatically finds next available port and updates `.ports.json` and `.env.runtime`.
 
-# LLM responses (24 hour TTL)
-f"llm:analysis:{task_hash}"
-```
-
-### Background Jobs (Celery)
-
-**High Priority (immediate):**
-- `analyze_new_task(task_id)` - Called on task creation
-- `sync_ticktick_realtime(user_id)` - Webhook trigger
-
-**Medium Priority (every 5 min):**
-- `sync_all_users_ticktick()` - Backup sync
-- `update_workload_analytics(user_id)` - Recalculate stats
-
-**Low Priority (daily):**
-- `generate_weekly_reviews()` - Sunday 6pm
-- `cleanup_old_sync_logs()` - Delete logs >30 days
+**TickTick OAuth Caveat:** The redirect URI must match the backend port. If backend port changes, manually update `TICKTICK_REDIRECT_URI` in `backend/.env`.
 
 ## Key API Endpoints
 
 ```python
 # Authentication
-POST   /auth/ticktick/authorize
-GET    /auth/ticktick/callback
+POST   /auth/ticktick/authorize    # Initiate OAuth flow
+GET    /auth/ticktick/callback     # OAuth callback
+GET    /auth/me                    # Current user info
 POST   /auth/logout
 
 # Tasks
-GET    /api/tasks                   # List with filters
+GET    /api/tasks                  # List with filters (quadrant, project, status)
 GET    /api/tasks/{id}
-PUT    /api/tasks/{id}/priority     # Manual override
-PUT    /api/tasks/{id}/quadrant
+POST   /api/tasks                  # Create task
+PUT    /api/tasks/{id}             # Update task
+PUT    /api/tasks/{id}/quadrant    # Manual quadrant override
 DELETE /api/tasks/{id}
 
+# Agent (SSE streaming)
+POST   /api/agent/chat             # Conversational agent (returns SSE stream)
+
+# LLM Configuration
+GET    /api/llm-configurations                    # List saved configs
+POST   /api/llm-configurations                    # Create new config
+PUT    /api/llm-configurations/{id}/activate      # Switch active provider
+DELETE /api/llm-configurations/{id}               # Delete config
+POST   /api/llm-configurations/test-connection    # Test provider connection
+
 # Sync
-POST   /api/sync/ticktick           # Trigger manual sync
-POST   /webhooks/ticktick           # Webhook receiver
+POST   /api/sync/ticktick/manual   # Trigger manual TickTick sync
+POST   /webhooks/ticktick          # TickTick webhook receiver
 
-# Analytics
-GET    /api/analytics/workload
-GET    /api/analytics/weekly
-GET    /api/analytics/rest-score
-
-# Email
-POST   /api/email/draft/{task_id}   # Generate with Claude
-POST   /api/email/send
-
-# Azure DevOps
-POST   /api/azure/create-workitem
-GET    /api/azure/workitems
+# Settings
+GET    /api/settings/user          # User personalization settings
+PUT    /api/settings/user          # Update settings
 ```
 
 ## Database Schema
@@ -338,145 +346,97 @@ GET    /api/azure/workitems
 
 **User:**
 - `ticktick_access_token`, `ticktick_refresh_token` (encrypted)
-- `google_access_token`, `google_refresh_token`
-- OAuth tokens for all integrations
+- `default_view` - Preferred dashboard view (matrix/simple)
+- `time_zone`, `work_hours_start`, `work_hours_end`
 
 **Task:**
-- TickTick data: `title`, `description`, `due_date`, `ticktick_task_id`
-- LLM analysis: `urgency_score`, `importance_score`, `effort_hours`, `eisenhower_quadrant`, `blockers` (JSONB), `tags` (JSONB)
-- Overrides: `manual_priority_override`, `manual_quadrant_override`
-- Calendar: `calendar_event_id`, `scheduled_start`, `scheduled_end`
+- TickTick sync: `title`, `description`, `due_date`, `ticktick_task_id`, `ticktick_project_id`
+- Prioritization: `urgency_score`, `importance_score`, `eisenhower_quadrant`
+- Metadata: `status`, `priority`, `tags` (JSONB), `manual_order` (for drag-drop sorting)
+- Relations: `user_id`, `project_id`
+
+**Project:**
+- `name`, `color`, `ticktick_project_id`
+- `is_inbox` - Flag for default inbox project
+
+**LLMConfiguration:**
+- `provider` - ollama/openrouter/anthropic/openai
+- `model`, `base_url`, `api_key` (encrypted), `temperature`, `max_tokens`
+- `is_active` - Current active config per user
 
 **Indexes:**
 - `idx_user_quadrant` on `(user_id, eisenhower_quadrant)`
 - `idx_user_status` on `(user_id, status)`
-- `idx_due_date` on `due_date`
+- `idx_user_project` on `(user_id, project_id)`
 
 ## Environment Variables
 
 Required in `backend/.env`:
 
 ```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/context
-REDIS_URL=redis://localhost:6379
+# Database (Docker Compose)
+DATABASE_URL=postgresql+asyncpg://context:context_dev@127.0.0.1:5433/context
+REDIS_URL=redis://127.0.0.1:6379
 
-# APIs
+# LLM Provider (choose one or configure multiple in UI)
+LLM_PROVIDER=ollama              # ollama | openrouter | anthropic | openai
+LLM_MODEL=qwen3:8b               # Model identifier
+LLM_BASE_URL=http://127.0.0.1:11434  # For Ollama
+LLM_API_KEY=sk-xxx               # For cloud providers
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=1000
+
+# TickTick OAuth
 TICKTICK_CLIENT_ID=your_client_id
 TICKTICK_CLIENT_SECRET=your_client_secret
-TICKTICK_REDIRECT_URI=http://localhost:8000/auth/callback
-
-ANTHROPIC_API_KEY=your_claude_api_key
-
-GMAIL_CLIENT_ID=your_gmail_client_id
-GMAIL_CLIENT_SECRET=your_gmail_client_secret
-
-AZURE_DEVOPS_ORG=your_org
-AZURE_DEVOPS_PAT=your_personal_access_token
+# IMPORTANT: Update this if backend port changes (see .env.runtime)
+TICKTICK_REDIRECT_URI=http://localhost:5400/auth/ticktick/callback
 
 # App
 SECRET_KEY=your_secret_key_min_32_chars
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5401
 ```
 
 Frontend in `frontend/.env.local`:
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:5400
 ```
 
-## Error Handling Patterns
-
-**LLM API Failures:**
-1. Retry 3x with exponential backoff
-2. If still failing, mark task for manual review
-3. User sees "Analysis pending" state
-
-**TickTick Sync Failures:**
-1. Log to `sync_logs` table
-2. Retry in next 5-min cycle
-3. Alert user if >3 consecutive failures
-
-**Rate Limiting:**
-- 100 API requests/min per user
-- 50 LLM calls/hour per user
-- Enforced via Redis counters
-
-## Development Workflow
-
-1. **Feature Branch:** Create from `main`
-2. **Develop:** Write code + tests
-3. **Test Locally:** `pytest` (backend), `npm test` (frontend)
-4. **Commit:** Use conventional commits (`feat:`, `fix:`, `refactor:`)
-5. **PR:** Open pull request to `main`
-6. **Deploy:** Merge triggers CI/CD
-
-## UI Design System
-
-**Color Scheme (Dark Mode):**
-- Background: `#1f2937` (gray-800)
-- Cards: `#374151` (gray-700)
-- Accents: `#60a5fa` (blue-400)
-- Text: `#f9fafb` (gray-50)
-
-**Layout:** Compact, matrix-first (Eisenhower matrix is primary view)
-**Button Style:** Minimal with subtle hover states
+**Note:** Actual runtime ports are in `.env.runtime` (auto-generated by `init.sh`).
 
 ## Important Implementation Notes
 
-1. **All LLM calls are async** and run in Celery workers to avoid blocking the API
-2. **WebSocket connection** handles real-time task updates (auto-reconnect on disconnect)
-3. **Token refresh** is automatic - check for 401 errors and refresh OAuth tokens
-4. **Manual overrides always win** - if user manually sets priority, don't override with LLM
-5. **Embeddings for similarity** - ChromaDB stores task embeddings for finding similar tasks
-6. **Retry logic** - Use `tenacity` library for API call retries with exponential backoff
-7. **All API tokens encrypted at rest** using AES-256
+1. **SSL/TLS Certificate Handling (macOS):** The backend uses a custom CA bundle path (`backend/certs/combined.pem` or certifi) to handle corporate proxies like Zscaler. Set via `SSL_CERT_FILE` environment variable in `backend/app/core/llm_config.py` and `init.sh`.
 
-## Phase Breakdown
+2. **LLM Provider Connections:** Test connections before activating a provider config. The UI provides a test endpoint (`POST /api/llm-configurations/test-connection`) that verifies API keys and network connectivity.
 
-**Phase 1 (Weeks 1-4):** Smart Task Intake, Dashboard, Manual Overrides
-**Phase 2 (Weeks 5-8):** Workload Intelligence, Rest Reminders, Email Drafts
-**Phase 3 (Weeks 9-10.5):** Azure DevOps Integration, Weekly Planning, Voice Capture
+3. **Agent Tool Calling:** LangGraph agent uses function calling. Ensure the LLM model supports tool/function calling (Qwen3, Claude, GPT-4, etc.). Smaller models may struggle with complex JSON schemas.
 
-See `MVP_ROADMAP.md` for detailed week-by-week implementation plan.
+4. **Task Manual Ordering:** Drag-and-drop in the UI updates `manual_order` field. This is independent of priority/urgency scores and takes precedence in UI sorting.
 
-## API Integration References
+5. **TickTick Sync Conflicts:** The app doesn't auto-merge conflicts. If a task is modified in both TickTick and Context, manual sync will use Context's version (last write wins).
 
-- **TickTick API:** https://developer.ticktick.com/api
-- **Claude API:** Uses Anthropic Python SDK
-- **Google Calendar/Gmail:** Uses `google-api-python-client`
-- **Azure DevOps:** Uses `azure-devops` Python package
-- **Whisper (Voice):** OpenAI Whisper API for transcription
+6. **SSE Streaming:** The agent endpoint returns Server-Sent Events. Frontend must handle reconnection logic and parse `event: thinking|message|tool_call` types.
 
-Full OAuth setup and code examples in `API_INTEGRATION.md`.
+7. **OAuth Tokens:** TickTick tokens are encrypted at rest in PostgreSQL. Token refresh is automatic but check for 401 errors.
+
+8. **Manual Overrides Win:** If user manually sets quadrant/priority via UI, don't override with LLM analysis.
 
 ## Documentation
 
-All detailed documentation is in the `docs/` folder:
+Detailed documentation is in the `docs/` folder:
 
-- `docs/ARCHITECTURE.md` - System design, data flows, deployment
-- `docs/FEATURES.md` - Detailed feature specifications
-- `docs/TECH_STACK.md` - Technology choices and rationale
-- `docs/API_INTEGRATION.md` - External API setup guides
-- `docs/MVP_ROADMAP.md` - Week-by-week implementation plan
+- `docs/agentic-assistant-plan.md` - LangGraph agent architecture and iteration plan
+- `docs/langchain-migration-plan.md` - Migration from raw Ollama API to LangChain
+- `docs/ARCHITECTURE.md` - System design, data flows
+- `docs/FEATURES.md` - Feature specifications
+- `docs/API_INTEGRATION.md` - TickTick OAuth setup guide
 
-## Claude Code Slash Commands
+## Development Principles
 
-Custom slash commands are available in `.claude/commands/` to accelerate development:
-
-- `/new-feature` - Scaffold features following the architecture
-- `/analyze-prompt` - Improve LLM prompts for better accuracy
-- `/debug-llm` - Debug Claude API integration issues
-- `/celery-debug` - Debug background task problems
-- `/migration` - Create safe database migrations
-- `/optimize` - Identify and fix performance bottlenecks
-- `/test-scenario` - Create comprehensive tests
-- `/api-docs` - Generate API documentation
-
-See `.claude/README.md` for detailed usage and examples.
-
-Remember:
-- We DONT add any keys into git - since its a public project
-- The goal is to have feedback driven execution that works at speed to deliver quick value to users
+- **No Secrets in Git:** This is a public project - never commit API keys, tokens, or credentials
+- **Feedback-Driven:** Prioritize quick iterations and user feedback over perfection
+- **Use Context7:** Always use Context7 MCP for library documentation and code generation assistance
 
 ## Remediation Log (Qwen3 / Ollama)
 - **Issue 1:** Qwen3 returned empty `content` while JSON landed in `thinking` when `format:"json"` was used.

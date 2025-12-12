@@ -13,6 +13,7 @@ import {
     ClipboardList,
     Workflow,
     AlertTriangle,
+    Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +24,7 @@ import {
     PendingAction,
     useAgentStream,
 } from "@/lib/useAgentStream";
+import { ExportChatDialog } from "@/components/ExportChatDialog";
 
 const escapeHtml = (value: string) =>
     value
@@ -232,7 +234,24 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
         executePending,
     } = useAgentStream();
     const [input, setInput] = useState("");
+    const [devMode, setDevMode] = useState(false);
+    const [showExportDialog, setShowExportDialog] = useState(false);
     const scrollRef = useRef<HTMLDivElement | null>(null);
+
+    // Listen for dev mode changes
+    useEffect(() => {
+        const stored = localStorage.getItem("dev_mode");
+        setDevMode(stored === "true");
+
+        const handleDevModeChange = (e: CustomEvent) => {
+            setDevMode(e.detail.enabled);
+        };
+
+        window.addEventListener("dev-mode-changed", handleDevModeChange as EventListener);
+        return () => {
+            window.removeEventListener("dev-mode-changed", handleDevModeChange as EventListener);
+        };
+    }, []);
 
     const placeholder = useMemo(
         () => "Ask to plan your day, triage tasks, or create/complete items…",
@@ -280,6 +299,17 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                             <Square className="size-4" />
                         </Button>
                     ) : null}
+                    {devMode && messages.length > 0 && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowExportDialog(true)}
+                            title="Export chat log (Dev)"
+                            className="text-blue-500 hover:text-blue-600"
+                        >
+                            <Download className="size-4" />
+                        </Button>
+                    )}
                     <Button variant="ghost" size="icon" onClick={clear} title="Clear conversation">
                         <RotateCcw className="size-4" />
                     </Button>
@@ -374,6 +404,12 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                     </div>
                 </div>
             </footer>
+
+            <ExportChatDialog
+                isOpen={showExportDialog}
+                onClose={() => setShowExportDialog(false)}
+                messages={messages}
+            />
         </aside>
     );
 }

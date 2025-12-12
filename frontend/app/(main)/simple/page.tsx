@@ -49,10 +49,10 @@ export default function SimpleTaskView() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
-      <h1 className="text-3xl font-bold mb-6 text-white">Simple Task View</h1>
+      <h1 className="text-3xl font-bold mb-6 text-foreground">Simple Task View</h1>
 
-      <div className="bg-gray-800 rounded-lg p-6 mb-8 border border-gray-700">
-        <h2 className="text-xl font-semibold mb-4 text-white">
+      <div className="bg-card rounded-lg p-6 mb-8 border border-border shadow-sm">
+        <h2 className="text-xl font-semibold mb-4 text-card-foreground">
           Quick Add Task
         </h2>
         <input
@@ -61,19 +61,19 @@ export default function SimpleTaskView() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyPress={handleKeyPress}
-          className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-3 border border-gray-600 focus:border-blue-500 focus:outline-none"
+          className="w-full px-4 py-2 bg-input text-foreground rounded mb-3 border border-border focus:border-ring focus:outline-none placeholder:text-muted-foreground"
         />
         <textarea
           placeholder="Description (optional)..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-3 border border-gray-600 focus:border-blue-500 focus:outline-none resize-none"
+          className="w-full px-4 py-2 bg-input text-foreground rounded mb-3 border border-border focus:border-ring focus:outline-none resize-none placeholder:text-muted-foreground"
         />
         <button
           onClick={handleCreateTask}
           disabled={creating || !title.trim()}
-          className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          className="w-full px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
         >
           {creating ? "⏳ Creating..." : "Add Task (syncs to TickTick)"}
         </button>
