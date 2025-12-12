@@ -120,6 +120,60 @@ npm test
 npm run test:e2e
 ```
 
+### Agent System Testing (Ollama/Qwen3)
+
+**Interactive testing workflow for the agentic assistant:**
+
+```bash
+# 1. Single query test (interactive)
+./backend/scripts/test_agent.sh --query "Create task for meeting at 2pm"
+
+# 2. Run all test cases
+./backend/scripts/run_agent_tests.sh
+
+# 3. Inspect raw Ollama behavior (debug model issues)
+./backend/scripts/inspect_ollama.sh --prompt "Generate JSON plan" --think false
+
+# 4. Compare before/after changes (regression testing)
+./backend/scripts/test_agent.sh --batch --save results_v1.json
+# (make code changes to planner.py or prompts)
+./backend/scripts/test_agent.sh --batch --save results_v2.json --diff results_v1.json
+```
+
+**Note:** All scripts automatically activate the Python venv at `backend/venv` if it exists.
+
+**Iteration workflow:**
+
+1. **Test** - Run agent tests to see current behavior
+2. **Read** - Examine output (thinking, tool calls, messages, errors)
+3. **Modify** - Adjust prompts, token limits, or logic in `backend/app/agent/`
+4. **Test Again** - Verify improvements, compare with previous results
+5. **Document** - Update `docs/agentic-assistant-plan.md` with findings
+
+**Key test scripts:**
+
+- `backend/scripts/test_agent.sh` - Full-featured test runner with SSE capture
+- `backend/scripts/inspect_ollama.sh` - Raw Ollama API inspector
+- `backend/scripts/run_agent_tests.sh` - Automated test suite with reporting
+- `backend/tests/agent_test_cases.json` - 20+ test scenarios
+
+**What gets tested:**
+
+- Tool calling accuracy (create/complete/delete/list tasks)
+- Conversational responses (greetings, advice, questions)
+- Response quality (no truncation, no thinking leaks)
+- Edge cases (ambiguous input, long responses, empty queries)
+- Performance metrics (duration, token usage, error rates)
+
+**Test output:**
+
+Results saved to `backend/test_results/` with:
+- Full SSE event stream capture
+- Tool call logs with args/results
+- Thinking vs message separation
+- Pass/fail criteria evaluation
+- Regression comparison reports
+
 ## Project Structure
 
 ### Backend (`backend/`)

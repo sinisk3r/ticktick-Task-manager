@@ -103,7 +103,8 @@ async def callback_ticktick(
             print(f"[WARN] Could not fetch TickTick user info: {e}")
 
         # Redirect to frontend with success message
-        frontend_url = "http://localhost:3000"
+        from app.core.config import settings
+        frontend_url = settings.frontend_url
         redirect_url = f"{frontend_url}/auth/callback?status=success&message=TickTick+connected+successfully"
         print(f"[DEBUG] Redirecting to: {redirect_url}")
         return RedirectResponse(url=redirect_url)
@@ -114,7 +115,8 @@ async def callback_ticktick(
         error_details = traceback.format_exc()
         print(f"[ERROR] TickTick OAuth callback failed:\n{error_details}")
 
-        frontend_url = "http://localhost:3000"
+        from app.core.config import settings
+        frontend_url = settings.frontend_url
         error_msg = str(e).replace(" ", "+")[:100]  # Truncate long errors
         return RedirectResponse(
             url=f"{frontend_url}/auth/callback?status=error&message={error_msg}"

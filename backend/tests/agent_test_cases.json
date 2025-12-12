@@ -1,0 +1,195 @@
+[
+  {
+    "name": "Tool Call: Create Task with Time",
+    "query": "Create a task for me to run 15 minutes tomorrow at 1 PM",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "create_task",
+      "should_succeed": true,
+      "no_truncation": true,
+      "no_thinking_leak": true
+    }
+  },
+  {
+    "name": "Tool Call: Create Simple Task",
+    "query": "Add task: Review quarterly reports",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "create_task",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: Complete Task",
+    "query": "Mark task 'morning standup' as done",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "complete_task",
+      "should_succeed": false,
+      "comment": "Will fail if task doesn't exist, but should attempt tool call"
+    }
+  },
+  {
+    "name": "Tool Call: List Tasks",
+    "query": "Show me all my tasks",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "fetch_tasks",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: List Urgent Tasks",
+    "query": "What are my urgent tasks?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "fetch_tasks",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Conversational: Greeting",
+    "query": "Good morning",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true,
+      "no_thinking_leak": true
+    }
+  },
+  {
+    "name": "Conversational: How Are You",
+    "query": "How are you doing?",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true
+    }
+  },
+  {
+    "name": "Conversational: Advice Request",
+    "query": "How should I prioritize my work today?",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true,
+      "no_thinking_leak": true,
+      "comment": "Should give advice without calling tools"
+    }
+  },
+  {
+    "name": "Conversational: General Question",
+    "query": "What's the best way to manage my time?",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true
+    }
+  },
+  {
+    "name": "Conversational: Eisenhower Question",
+    "query": "Tell me about the Eisenhower matrix",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true
+    }
+  },
+  {
+    "name": "Edge Case: Ambiguous Intent",
+    "query": "What about the meeting?",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "comment": "Too vague, should ask for clarification or give general response"
+    }
+  },
+  {
+    "name": "Edge Case: Long Response Required",
+    "query": "What are the top 3 most important items I should focus on this week?",
+    "expected": {
+      "should_call_tools": true,
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should fetch tasks and provide thoughtful answer without truncating"
+    }
+  },
+  {
+    "name": "Edge Case: Empty Input",
+    "query": "",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "comment": "Should handle gracefully"
+    }
+  },
+  {
+    "name": "Tool Call: Create with Priority",
+    "query": "Create urgent task: Fix production bug ASAP",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "create_task",
+      "should_succeed": true,
+      "comment": "Should extract urgency and set high priority"
+    }
+  },
+  {
+    "name": "Tool Call: Create with Due Date",
+    "query": "Add task to submit expense report by Friday",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "create_task",
+      "should_succeed": true,
+      "comment": "Should extract and format due date"
+    }
+  },
+  {
+    "name": "Tool Call: Create with Tags",
+    "query": "New task: Research AI tools for productivity #research #ai",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "create_task",
+      "should_succeed": true,
+      "comment": "Should extract tags from hashtags"
+    }
+  },
+  {
+    "name": "Conversational: Help Request",
+    "query": "I'm feeling overwhelmed with too many tasks",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true,
+      "no_thinking_leak": true,
+      "comment": "Should provide empathetic response with advice"
+    }
+  },
+  {
+    "name": "Tool Call: Multiple Actions",
+    "query": "Create task for team meeting and show me my current tasks",
+    "expected": {
+      "should_call_tools": true,
+      "should_succeed": true,
+      "comment": "Should handle multiple tool calls or prioritize one"
+    }
+  },
+  {
+    "name": "Conversational: Thank You",
+    "query": "Thanks for the help!",
+    "expected": {
+      "should_call_tools": false,
+      "should_succeed": true,
+      "no_truncation": true
+    }
+  },
+  {
+    "name": "Tool Call: Delete Task",
+    "query": "Delete the task about grocery shopping",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "delete_task",
+      "should_succeed": false,
+      "comment": "Will likely fail without task ID but should attempt"
+    }
+  }
+]

@@ -9,6 +9,8 @@ This service handles:
 """
 import httpx
 import logging
+import ssl
+import certifi
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,11 @@ from app.core.config import settings
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+# SSL verification setting for TickTick API
+# NOTE: Temporarily disabled due to macOS SSL certificate issues
+# TODO: Re-enable once proper certificate configuration is resolved
+_SSL_VERIFY = False  # Set to False to disable SSL verification (development only)
 
 
 class TickTickService:
@@ -44,7 +51,8 @@ class TickTickService:
         self.redirect_uri = settings.ticktick_redirect_uri
         self.user = user
         self.base_url = self.API_BASE_URL
-        self.client = httpx.AsyncClient()
+        # Create client with SSL verification disabled (temporary workaround)
+        self.client = httpx.AsyncClient(verify=_SSL_VERIFY)
 
     def get_authorization_url(self, state: Optional[str] = None) -> str:
         """
@@ -90,7 +98,7 @@ class TickTickService:
         Raises:
             httpx.HTTPError: If token exchange fails
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_SSL_VERIFY) as client:
             response = await client.post(
                 self.TOKEN_URL,
                 data={
@@ -122,7 +130,7 @@ class TickTickService:
         Raises:
             httpx.HTTPError: If token refresh fails
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_SSL_VERIFY) as client:
             response = await client.post(
                 self.TOKEN_URL,
                 data={
@@ -191,7 +199,7 @@ class TickTickService:
         Raises:
             httpx.HTTPError: If API request fails
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_SSL_VERIFY) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/project",
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -217,7 +225,7 @@ class TickTickService:
         Raises:
             httpx.HTTPError: If API request fails
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_SSL_VERIFY) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/project/{project_id}/data",
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -467,7 +475,7 @@ class TickTickService:
         Raises:
             httpx.HTTPError: If API request fails
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_SSL_VERIFY) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/user",
                 headers={"Authorization": f"Bearer {access_token}"},

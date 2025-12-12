@@ -1,11 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Send, Loader2, Sparkles, Square, RotateCcw, Check } from "lucide-react";
+import {
+    X,
+    Send,
+    Loader2,
+    Sparkles,
+    Square,
+    RotateCcw,
+    Check,
+    Wand2,
+    ClipboardList,
+    Workflow,
+    AlertTriangle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ChatMessage, useChatStream } from "@/lib/useChatStream";
+import {
+    AgentEvent,
+    AgentMessage,
+    PendingAction,
+    useAgentStream,
+} from "@/lib/useAgentStream";
 
 const escapeHtml = (value: string) =>
     value
@@ -24,6 +41,93 @@ const renderMarkdownLite = (value: string) => {
     return html;
 };
 
+const EventRow = ({ event }: { event: AgentEvent }) => {
+    const type = event.type;
+    const data = event.data || {};
+    const summary =
+        data.summary ||
+        data.text ||
+        data.delta ||
+        data.message ||
+        data.result?.summary ||
+        data.result?.message ||
+        data.result?.analysis?.reasoning ||
+        "";
+
+    const iconMap: Record<string, JSX.Element> = {
+        thinking: <Wand2 className="size-3.5 text-muted-foreground" />,
+        step: <Workflow className="size-3.5 text-muted-foreground" />,
+        tool_request: <ClipboardList className="size-3.5 text-muted-foreground" />,
+        tool_result: <Check className="size-3.5 text-emerald-500" />,
+        message: <Sparkles className="size-3.5 text-primary" />,
+        error: <AlertTriangle className="size-3.5 text-destructive" />,
+        done: <Check className="size-3.5 text-muted-foreground" />,
+    };
+
+    return (
+        <div className="flex items-start gap-2 text-xs leading-tight">
+            <span className="mt-0.5">{iconMap[type] || <Sparkles className="size-3.5" />}</span>
+            <div className="flex-1">
+                <div className="font-medium capitalize text-foreground/80">{type.replace("_", " ")}</div>
+                {summary ? <p className="text-muted-foreground">{summary}</p> : null}
+                {type === "tool_request" && data.tool ? (
+                    <p className="text-[11px] text-muted-foreground/80">Tool: {data.tool}</p>
+                ) : null}
+            </div>
+        </div>
+    );
+};
+
+const AgentTimeline = ({
+    events,
+    pendingAction,
+    onConfirm,
+    onCancel,
+}: {
+    events: AgentEvent[];
+    pendingAction: PendingAction | null;
+    onConfirm: () => void;
+    onCancel: () => void;
+}) => {
+    const actionable = events.filter(
+        (evt) =>
+            evt.type === "tool_request" ||
+            evt.type === "tool_result" ||
+            evt.type === "step" ||
+            evt.type === "error",
+    );
+
+    if (!actionable.length && !pendingAction) return null;
+
+    return (
+        <div className="mt-2 rounded-md border border-border/60 bg-muted/40">
+            <div className="flex items-center justify-between px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <span>Agent actions</span>
+                <Sparkles className="size-3.5" />
+            </div>
+            <div className="divide-y divide-border/60 px-3 py-2 space-y-2">
+                {actionable.map((evt) => (
+                    <EventRow key={evt.id} event={evt} />
+                ))}
+                {pendingAction ? (
+                    <div className="flex items-center gap-2 text-xs">
+                        <AlertTriangle className="size-3.5 text-amber-500" />
+                        <span className="flex-1 text-muted-foreground">
+                            {pendingAction.tool} needs confirmation.
+                        </span>
+                        <Button size="xs" variant="destructive" onClick={onConfirm}>
+                            Confirm
+                        </Button>
+                        <Button size="xs" variant="ghost" onClick={onCancel}>
+                            Cancel
+                        </Button>
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+};
+
 interface ChatPanelProps {
     isOpen: boolean;
     onClose: () => void;
@@ -36,11 +140,17 @@ const MessageBubble = ({
     showThinking,
     thinking,
     isStreaming,
+    pendingAction,
+    onConfirm,
+    onCancel,
 }: {
-    message: ChatMessage;
+    message: AgentMessage;
     showThinking?: boolean;
     thinking?: string;
     isStreaming: boolean;
+    pendingAction: PendingAction | null;
+    onConfirm: () => void;
+    onCancel: () => void;
 }) => {
     const isAssistant = message.role === "assistant";
     const [collapsed, setCollapsed] = useState(false);
@@ -94,6 +204,12 @@ const MessageBubble = ({
                                 __html: renderMarkdownLite(message.content || "Thinking…"),
                             }}
                         />
+                        <AgentTimeline
+                            events={message.events}
+                            pendingAction={pendingAction}
+                            onConfirm={onConfirm}
+                            onCancel={onCancel}
+                        />
                     </div>
                 ) : (
                     message.content
@@ -104,12 +220,22 @@ const MessageBubble = ({
 };
 
 export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps) {
-    const { messages, isStreaming, error, thinking, sendMessage, stop, clear } = useChatStream();
+    const {
+        messages,
+        isStreaming,
+        error,
+        thinking,
+        pendingAction,
+        sendGoal,
+        stop,
+        clear,
+        executePending,
+    } = useAgentStream();
     const [input, setInput] = useState("");
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
     const placeholder = useMemo(
-        () => "Ask to plan your day, draft replies, or triage tasks…",
+        () => "Ask to plan your day, triage tasks, or create/complete items…",
         [],
     );
 
@@ -122,7 +248,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
         if (!input.trim()) return;
         const toSend = input;
         setInput("");
-        await sendMessage(toSend, { context });
+        await sendGoal(toSend, { context });
     };
 
     const panelClass = cn(
@@ -169,8 +295,8 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                         <p className="font-medium text-foreground">How I can help</p>
                         <ul className="mt-2 space-y-1 list-disc list-inside">
                             <li>“Plan my afternoon with focus blocks.”</li>
-                            <li>“Draft a response to the budget email.”</li>
-                            <li>“Which Q1 tasks can I finish in 30 minutes?”</li>
+                            <li>“Complete task 12 and draft a summary.”</li>
+                            <li>“Delete task 7” (will ask to confirm)</li>
                         </ul>
                     </div>
                 ) : (
@@ -187,6 +313,9 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                                     showThinking={thinking && isLastAssistant}
                                     thinking={thinking && isLastAssistant ? thinking : undefined}
                                     isStreaming={isStreaming}
+                                    pendingAction={isLastAssistant ? pendingAction : null}
+                                    onConfirm={() => executePending("confirm")}
+                                    onCancel={() => executePending("cancel")}
                                 />
                             );
                         })}
@@ -201,6 +330,9 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                                 showThinking
                                 thinking={thinking}
                                 isStreaming={isStreaming}
+                                pendingAction={null}
+                                onConfirm={() => executePending("confirm")}
+                                onCancel={() => executePending("cancel")}
                             />
                         ) : null}
                     </>
@@ -237,7 +369,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                             Send
                         </Button>
                         <p className="text-xs text-muted-foreground ml-auto">
-                            Streaming via `/api/chat/stream`
+                            Streaming via `/api/agent/stream`
                         </p>
                     </div>
                 </div>

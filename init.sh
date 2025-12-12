@@ -193,8 +193,14 @@ kill_port_owner() {
       log_info "[init] Detected owned process for $name (cmd: $cmdline); killing without prompt to avoid duplicates..."
       kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
       sleep 2
+      # Give extra time for port to be fully released
+      local retry_count=0
+      while [[ $retry_count -lt 3 ]] && check_port "$port"; do
+        sleep 1
+        ((retry_count++))
+      done
       if check_port "$port"; then
-        log_warn "[init] ERROR: Failed to free port $port"
+        log_warn "[init] ERROR: Failed to free port $port after killing process"
         return 1
       fi
       log_info "[init] Port $port freed successfully"
@@ -409,7 +415,9 @@ start_backend() {
   fi
 
   log_info "[init] Starting backend (uvicorn) on port $backend_port..."
-  (cd "$ROOT_DIR/backend" && "$uvicorn_bin" app.main:app --reload --port "$backend_port" >"$BACKEND_LOG" 2>&1 & echo $! >"$BACKEND_PID")
+  # Set SSL_CERT_FILE to use certifi's CA bundle for SSL verification (macOS compatibility)
+  local certifi_path="$ROOT_DIR/backend/venv/lib/python3.12/site-packages/certifi/cacert.pem"
+  (cd "$ROOT_DIR/backend" && SSL_CERT_FILE="$certifi_path" "$uvicorn_bin" app.main:app --reload --port "$backend_port" >"$BACKEND_LOG" 2>&1 & echo $! >"$BACKEND_PID")
 
   local backend_pid
   backend_pid=$(cat "$BACKEND_PID")

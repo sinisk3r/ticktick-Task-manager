@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CheckCircle2, XCircle, Loader2, Info, Link as LinkIcon, Unlink } from "lucide-react"
+import { CheckCircle2, XCircle, Loader2, Info, Link as LinkIcon, Unlink, ExternalLink } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Textarea } from "@/components/ui/textarea"
 import { API_BASE } from "@/lib/api"
@@ -15,7 +15,8 @@ export function LLMSettings() {
   const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [saveMessage, setSaveMessage] = useState<string>("")
-  const [backendUrl] = useState(API_BASE)
+  const [backendUrl, setBackendUrl] = useState(API_BASE)
+  const [backendUrlInput, setBackendUrlInput] = useState(API_BASE)
 
   // TickTick state
   const [ticktickConnected, setTicktickConnected] = useState(false)
@@ -42,6 +43,12 @@ export function LLMSettings() {
   useEffect(() => {
     const savedModel = localStorage.getItem("llm_model")
     if (savedModel) setSelectedModel(savedModel)
+
+    const savedBackendUrl = localStorage.getItem("backend_url")
+    if (savedBackendUrl) {
+      setBackendUrl(savedBackendUrl)
+      setBackendUrlInput(savedBackendUrl)
+    }
 
     // Fetch available models and test connection
     fetchModels()
@@ -185,6 +192,18 @@ export function LLMSettings() {
     }
   }
 
+  const saveBackendUrl = () => {
+    localStorage.setItem("backend_url", backendUrlInput)
+    setBackendUrl(backendUrlInput)
+    setSaveMessage(`Backend URL updated to ${backendUrlInput}`)
+
+    // Clear save message after 3 seconds
+    setTimeout(() => setSaveMessage(""), 3000)
+
+    // Reload the page to apply new backend URL
+    setTimeout(() => window.location.reload(), 1000)
+  }
+
   const saveSettings = () => {
     localStorage.setItem("llm_model", selectedModel)
     setSaveMessage(`Settings saved! Model: ${selectedModel}`)
@@ -228,11 +247,20 @@ export function LLMSettings() {
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Backend URL</label>
-              <div className="p-3 bg-muted/50 rounded-md border border-border">
-                <code className="text-sm text-foreground">{backendUrl}</code>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={backendUrlInput}
+                  onChange={(e) => setBackendUrlInput(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="http://localhost:5407"
+                />
+                <Button onClick={saveBackendUrl} variant="outline" size="sm">
+                  Update
+                </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                The backend server handles all LLM communication
+                Current: <code className="text-xs">{backendUrl}</code>
               </p>
             </div>
 
@@ -360,6 +388,45 @@ export function LLMSettings() {
               All tasks will be automatically analyzed by AI.
             </AlertDescription>
           </Alert>
+
+          <div className="space-y-3 p-3 bg-muted/30 rounded-md border border-border">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Info className="h-4 w-4 flex-shrink-0" />
+              <span>Manage your TickTick OAuth apps:</span>
+              <a
+                href="https://developer.ticktick.com/manage"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 inline-flex items-center gap-1 hover:underline"
+              >
+                Developer Console
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Required Redirect URI:</p>
+              <div className="flex items-center gap-2 p-2 bg-background rounded border border-border">
+                <code className="text-xs text-foreground flex-1">
+                  {backendUrl}/auth/ticktick/callback
+                </code>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${backendUrl}/auth/ticktick/callback`)
+                    setSaveMessage("Redirect URI copied to clipboard!")
+                    setTimeout(() => setSaveMessage(""), 2000)
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Add this exact URI to your TickTick OAuth app settings
+              </p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

@@ -1,13 +1,18 @@
 import os
 from contextlib import asynccontextmanager
 
+# Set SSL certificate paths BEFORE any other imports that use SSL
+import certifi
+os.environ['SSL_CERT_FILE'] = certifi.where()
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.services import OllamaService
-from app.api import tasks, settings, auth, profile, projects, chat
+from app.api import tasks, settings, auth, profile, projects, chat, agent
 
 # Load environment variables
 load_dotenv()
@@ -71,6 +76,7 @@ app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(projects.router)
 app.include_router(chat.router)
+app.include_router(agent.router)
 
 
 # Request/Response models
