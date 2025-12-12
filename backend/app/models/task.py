@@ -1,7 +1,7 @@
 """
 Task model with LLM analysis results and Eisenhower matrix classification.
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, ForeignKey, Enum as SQLEnum, Boolean
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, ForeignKey, Enum as SQLEnum, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -81,7 +81,7 @@ class Task(Base):
     # Organization
     project_name = Column(String(500), nullable=True)
     parent_task_id = Column(String(255), nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
+    sort_order = Column(BigInteger, default=0, nullable=False)
     column_id = Column(String(255), nullable=True)
 
     # Additional Metadata

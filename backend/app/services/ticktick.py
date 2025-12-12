@@ -291,6 +291,42 @@ class TickTickService:
         )
         return total_minutes if total_minutes > 0 else None
 
+    def _extract_first_reminder(self, reminders: Any) -> Optional[str]:
+        """
+        Extract the first reminder trigger from TickTick reminders.
+
+        Handles both V1 API (list of strings) and V2 API (list of dicts).
+
+        Args:
+            reminders: Can be:
+                - list[str]: V1 API format like ["TRIGGER:PT0S"]
+                - list[dict]: V2 API format like [{"id": "...", "trigger": "TRIGGER:PT0S"}]
+                - None or empty
+
+        Returns:
+            Trigger string or None
+        """
+        if not reminders:
+            return None
+
+        if not isinstance(reminders, list):
+            return None
+
+        if len(reminders) == 0:
+            return None
+
+        first_reminder = reminders[0]
+
+        # V1 API: reminders is list of strings
+        if isinstance(first_reminder, str):
+            return first_reminder
+
+        # V2 API: reminders is list of dicts with 'trigger' field
+        if isinstance(first_reminder, dict):
+            return first_reminder.get("trigger")
+
+        return None
+
     async def get_tasks(self, access_token: str) -> List[Dict[str, Any]]:
         """
         Fetch all tasks from TickTick API with COMPLETE metadata.
@@ -357,10 +393,10 @@ class TickTickService:
                         # All-day flag
                         "all_day": task_json.get("isAllDay", False),
 
-                        # Reminders (take first reminder if exists)
+                        # Reminders (extract first reminder trigger, handles both V1 and V2 API)
                         "reminder_time": self._parse_datetime(
-                            task_json.get("reminders", [{}])[0].get("trigger")
-                        ) if task_json.get("reminders") else None,
+                            self._extract_first_reminder(task_json.get("reminders"))
+                        ),
 
                         # Recurrence
                         "repeat_flag": task_json.get("repeatFlag"),
@@ -371,14 +407,14 @@ class TickTickService:
                         "column_id": task_json.get("columnId"),
 
                         # Tags (TickTick native tags)
-                        "ticktick_tags": task_json.get("tags", []),
+                        "ticktick_tags": task_json.get("tags", []) if isinstance(task_json.get("tags"), list) else [],
 
                         # Time tracking
                         "time_estimate": self._calculate_time_estimate(
-                            task_json.get("pomodoroSummaries", [])
+                            task_json.get("pomodoroSummaries", []) if isinstance(task_json.get("pomodoroSummaries"), list) else []
                         ),
                         "focus_time": self._calculate_focus_time(
-                            task_json.get("focusSummaries", [])
+                            task_json.get("focusSummaries", []) if isinstance(task_json.get("focusSummaries"), list) else []
                         ),
                     }
 

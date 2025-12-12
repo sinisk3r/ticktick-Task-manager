@@ -1,7 +1,7 @@
 """
 Project model for TickTick project integration.
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -24,7 +24,7 @@ class Project(Base):
     # Project Info
     name = Column(String(500), nullable=False)
     color = Column(String(50), nullable=True)  # Hex color code
-    sort_order = Column(Integer, default=0, nullable=False)
+    sort_order = Column(BigInteger, default=0, nullable=False)
     is_archived = Column(Boolean, default=False, nullable=False)
 
     # Timestamps
