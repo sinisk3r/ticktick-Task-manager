@@ -1,28 +1,24 @@
 "use client"
 
-import { useState, useCallback, ReactNode } from "react"
-import useSWR, { mutate } from 'swr'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ReactNode, useCallback, useMemo, useState, useRef, useEffect } from "react"
+import { createPortal } from "react-dom"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { PrioritySelect } from "@/components/PrioritySelect"
-import { DatePicker } from "@/components/DatePicker"
-import { MetadataRow } from "@/components/MetadataRow"
-import { MarkdownEditor } from "@/components/MarkdownEditor"
-import { SuggestionPanel } from "@/components/SuggestionPanel"
-import { api } from "@/lib/api"
-import { X, Trash2, AlertCircle } from "lucide-react"
+import { DatePickerWithOptionalTime } from "@/components/DatePickerWithOptionalTime"
+import { api, API_BASE } from "@/lib/api"
+import { X, Trash2, AlertCircle, Sparkles, Calendar, Layout } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Task, SuggestionsResponse } from "@/types/task"
+import { Task, EnhanceResponse } from "@/types/task"
 import { ProjectSelector } from "@/components/metadata/ProjectSelector"
 import { TagsInput } from "@/components/metadata/TagsInput"
 import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
 import { TimeEstimateInput } from "@/components/metadata/TimeEstimateInput"
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+import { CollapsibleDescription } from "@/components/CollapsibleDescription"
+import { toast } from "sonner"
+import useSWR from "swr"
 
 interface TaskDetailPopoverProps {
   task: Task
@@ -33,21 +29,25 @@ interface TaskDetailPopoverProps {
   onOpenChange?: (open: boolean) => void
 }
 
+// Simplified suggestion types
+interface SuggestionItem {
+  id: string
+  field: keyof Task | 'project' | 'tags'
+  label: string
+  value: any
+  displayValue: string
+}
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
 // Debounce hook
-function useDebounce<T extends (...args: any[]) => void>(
-  callback: T,
-  delay: number
-): (...args: Parameters<T>) => void {
+function useDebounce<T extends (...args: any[]) => void>(callback: T, delay: number): (...args: Parameters<T>) => void {
   const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null)
 
   return useCallback(
     (...args: Parameters<T>) => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
-      const newTimeoutId = setTimeout(() => {
-        callback(...args)
-      }, delay)
+      if (timeoutId) clearTimeout(timeoutId)
+      const newTimeoutId = setTimeout(() => callback(...args), delay)
       setTimeoutId(newTimeoutId)
     },
     [callback, delay, timeoutId]
@@ -66,95 +66,79 @@ export function TaskDetailPopover({
   const [localTask, setLocalTask] = useState(task)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [mounted, setMounted] = useState(false)
 
-  // Use controlled state if provided, otherwise use internal state
+  // AI State (simplified)
+  const [enhancing, setEnhancing] = useState(false)
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
+  const [rationale, setRationale] = useState<string | null>(null)
+
+  // Fetch projects for matching
+  const { data: projects } = useSWR<any[]>(`${API_BASE}/api/projects?user_id=1`, fetcher)
+
+  // Sync state with open prop or internal state
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = controlledOnOpenChange || setInternalOpen
 
-  // Fetch suggestions
-  const { data: suggestionsData } = useSWR<SuggestionsResponse>(
-    open ? `${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1` : null,
-    fetcher,
-    { refreshInterval: 0 } // Don't auto-refresh
-  )
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
-  const handleAnalyze = () => {
-    setAnalyzing(true)
-    setError(null)
+  // Handle Escape key and body scroll lock
+  useEffect(() => {
+    if (!open) return
 
-    api.post(`/api/tasks/${task.id}/analyze?user_id=1`)
-      .then(async () => {
-        await mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
-        const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
-        setLocalTask(refreshedTask)
-        if (onUpdate) {
-          onUpdate(refreshedTask)
-        }
-      })
-      .catch((error) => {
-        console.error("Analysis failed:", error)
-        setError("Failed to analyze task")
-      })
-      .finally(() => {
-        setAnalyzing(false)
-      })
-  }
-
-  const handleApproveSuggestion = async (types: string[]) => {
-    try {
-      await api.post(`/api/tasks/${task.id}/suggestions/approve?user_id=1`, {
-        suggestion_types: types
-      })
-
-      // Refresh task data and suggestions
-      const refreshedTask = await api.get<Task>(`/api/tasks/${task.id}?user_id=1`)
-      setLocalTask(refreshedTask)
-      if (onUpdate) {
-        onUpdate(refreshedTask)
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
       }
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
-    } catch (error) {
-      console.error('Approval failed:', error)
-      setError('Failed to approve suggestion')
     }
-  }
 
-  const handleRejectSuggestion = async (types: string[]) => {
-    try {
-      await api.post(`/api/tasks/${task.id}/suggestions/reject?user_id=1`, {
-        suggestion_types: types
-      })
+    // Lock body scroll
+    document.body.style.overflow = 'hidden'
 
-      mutate(`${API_BASE}/api/tasks/${task.id}/suggestions?user_id=1`)
-    } catch (error) {
-      console.error('Rejection failed:', error)
-      setError('Failed to reject suggestion')
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      document.body.style.overflow = ''
     }
-  }
+  }, [open, setOpen])
 
-  const displayedSuggestions = suggestionsData?.suggestions || []
+  // Calculate smart position based on cursor and viewport
+  const calculatePosition = useCallback((e: MouseEvent) => {
+    const popoverWidth = 680
+    const popoverHeight = 600
+    const padding = 20
 
-  // Auto-save function
+    let x = e.clientX + 10 // Offset from cursor
+    let y = e.clientY + 10
+
+    // Check right edge
+    if (x + popoverWidth > window.innerWidth - padding) {
+      x = window.innerWidth - popoverWidth - padding
+    }
+
+    // Check bottom edge
+    if (y + popoverHeight > window.innerHeight - padding) {
+      y = window.innerHeight - popoverHeight - padding
+    }
+
+    // Ensure not off left/top
+    x = Math.max(padding, x)
+    y = Math.max(padding, y)
+
+    setPosition({ x, y })
+  }, [])
+
   const saveTask = async (updates: Partial<Task>) => {
     try {
       setSaving(true)
       setError(null)
-
-      // Make API call to update task
-      const response = await api.patch<Task>(`/api/tasks/${task.id}`, {
-        ...updates,
-        user_id: 1, // Hardcoded for single-user mode
-      })
-
-      // Update local state
+      const response = await api.patch<Task>(`/api/tasks/${task.id}`, { ...updates, user_id: 1 })
       const updatedTask = { ...localTask, ...response }
       setLocalTask(updatedTask)
-
-      // Notify parent
-      if (onUpdate) {
-        onUpdate(updatedTask)
-      }
+      onUpdate?.(updatedTask)
     } catch (err: any) {
       console.error("Failed to save task:", err)
       setError(err.message || "Failed to save changes")
@@ -163,13 +147,11 @@ export function TaskDetailPopover({
     }
   }
 
-  // Debounced save for text fields
-  const debouncedSave = useDebounce(saveTask, 800)
+  const debouncedSave = useDebounce(saveTask, 700)
 
   const handleFieldChange = (field: keyof Task, value: any, immediate = false) => {
     const updates = { [field]: value }
     setLocalTask((prev) => ({ ...prev, ...updates }))
-
     if (immediate) {
       saveTask(updates)
     } else {
@@ -178,15 +160,12 @@ export function TaskDetailPopover({
   }
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this task?")) return
-
+    if (!confirm("Delete this task?")) return
     try {
       setSaving(true)
-      await api.delete(`/api/tasks/${task.id}`)
+      await api.delete(`/api/tasks/${task.id}?user_id=1`)
       setOpen(false)
-      if (onDelete) {
-        onDelete(task.id)
-      }
+      onDelete?.(task.id)
     } catch (err: any) {
       console.error("Failed to delete task:", err)
       setError(err.message || "Failed to delete task")
@@ -200,241 +179,395 @@ export function TaskDetailPopover({
     handleFieldChange("status", newStatus, true)
   }
 
-  const effectiveQuadrant =
-    localTask.manual_quadrant_override ||
-    localTask.effective_quadrant ||
-    localTask.eisenhower_quadrant
+  const handleEnhance = async () => {
+    setEnhancing(true)
+    setError(null)
+    setSuggestions([])
+    setRationale(null)
+
+    try {
+      const response = await api.post<EnhanceResponse>(
+        `/api/tasks/${task.id}/enhance?user_id=1`,
+        {
+          enhance_description: true,
+          enhance_dates: true,
+          enhance_project: true,
+          enhance_time: true,
+        }
+      )
+
+      processSuggestions(response)
+    } catch (err: any) {
+      console.error("Enhance failed:", err)
+      setError(err.message || "Failed to enhance task")
+      toast.error(err.message || "Failed to enhance task")
+    } finally {
+      setEnhancing(false)
+    }
+  }
+
+  const processSuggestions = (response: EnhanceResponse) => {
+    setRationale(response.rationale || null)
+    const newSuggestions: SuggestionItem[] = []
+
+    if (response.suggested_description && response.suggested_description !== localTask.description) {
+      newSuggestions.push({
+        id: 'desc',
+        field: 'description',
+        label: 'Description',
+        value: response.suggested_description,
+        displayValue: response.suggested_description
+      })
+    }
+
+    if (response.suggested_project) {
+      // Attempt to match project
+      let matchedProject = null
+      if (projects) {
+        const suggestName = (response.suggested_project.name || response.suggested_project.label || "").toLowerCase()
+        matchedProject = projects.find(p => p.name.toLowerCase() === suggestName)
+      }
+
+      const projectValue = matchedProject ? {
+        id: matchedProject.id,
+        name: matchedProject.name,
+        ticktick: matchedProject.ticktick_project_id
+      } : response.suggested_project
+
+      newSuggestions.push({
+        id: 'proj',
+        field: 'project',
+        label: 'Project',
+        value: projectValue,
+        displayValue: matchedProject ? matchedProject.name : (response.suggested_project.name || "Unknown")
+      })
+    }
+
+    if (response.suggested_reminder) {
+      newSuggestions.push({
+        id: 'rem',
+        field: 'reminder_time',
+        label: 'Reminder',
+        value: response.suggested_reminder,
+        displayValue: new Date(response.suggested_reminder).toLocaleString()
+      })
+    }
+
+    if (response.suggested_time_estimate) {
+      newSuggestions.push({
+        id: 'time',
+        field: 'time_estimate',
+        label: 'Time Estimate',
+        value: response.suggested_time_estimate,
+        displayValue: `${response.suggested_time_estimate} mins`
+      })
+    }
+
+    if (response.suggested_tags && response.suggested_tags.length > 0) {
+      newSuggestions.push({
+        id: 'tags',
+        field: 'tags',
+        label: 'Tags',
+        value: response.suggested_tags,
+        displayValue: response.suggested_tags.join(", ")
+      })
+    }
+
+    setSuggestions(newSuggestions)
+  }
+
+  const applySuggestions = async () => {
+    if (suggestions.length === 0) return
+
+    const updates: Partial<Task> = {}
+
+    suggestions.forEach(s => {
+      if (s.field === 'description') updates.description = s.value
+      else if (s.field === 'project') {
+        updates.project_id = s.value.id
+        updates.project_name = s.value.name
+        updates.ticktick_project_id = s.value.ticktick
+      }
+      else if (s.field === 'reminder_time') updates.reminder_time = s.value
+      else if (s.field === 'time_estimate') updates.time_estimate = s.value
+      else if (s.field === 'tags') updates.ticktick_tags = s.value
+    })
+
+    if (Object.keys(updates).length > 0) {
+      await saveTask(updates)
+      setSuggestions([])
+      setRationale(null)
+      toast.success("Applied AI suggestions")
+    }
+  }
+
+  const effectiveQuadrant = useMemo(
+    () =>
+      localTask.manual_quadrant_override ||
+      localTask.effective_quadrant ||
+      localTask.eisenhower_quadrant,
+    [localTask]
+  )
+
+  // Clone trigger and add click handler
+  const triggerWithHandler = typeof trigger === 'object' && trigger !== null && 'props' in trigger
+    ? {
+        ...trigger,
+        props: {
+          ...(trigger as any).props,
+          onClick: (e: React.MouseEvent) => {
+            calculatePosition(e.nativeEvent)
+            setOpen(true)
+            // Call original onClick if exists
+            ;(trigger as any).props?.onClick?.(e)
+          }
+        }
+      }
+    : trigger
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {trigger}
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogTitle className="sr-only">{localTask.title || "Task details"}</DialogTitle>
+    <>
+      {triggerWithHandler}
+
+      {mounted && open && createPortal(
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/50 z-50 animate-in fade-in"
+            onClick={() => setOpen(false)}
+          />
+
+          {/* Popover Content */}
+          <div
+            className="fixed z-[60] w-[680px] h-[600px] bg-background border rounded-lg shadow-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            style={{
+              left: `${position.x}px`,
+              top: `${position.y}px`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+
         {/* Header */}
-        <DialogHeader>
-          <div className="flex items-start gap-3">
+        <div className="flex items-start justify-between p-4 px-6 border-b shrink-0 bg-background z-20">
+          <div className="flex items-start gap-4 flex-1 mr-8">
             <Checkbox
               checked={localTask.status === "completed"}
               onCheckedChange={handleToggleComplete}
-              className="mt-1"
+              className="mt-1.5 size-5"
             />
-            <div className="flex-1">
+            <div className="flex-1 space-y-1">
               <Input
                 value={localTask.title}
                 onChange={(e) => handleFieldChange("title", e.target.value)}
-                className="text-lg font-semibold border-none px-0 focus-visible:ring-0"
+                className="text-xl font-bold border-none px-0 h-auto focus-visible:ring-0 rounded-none shadow-none bg-transparent"
                 placeholder="Task title"
               />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {localTask.project_name && (
+                  <div className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
+                    <div className="size-2 rounded-full bg-primary" />
+                    {localTask.project_name}
+                  </div>
+                )}
+                {localTask.created_at && <span>Created {new Date(localTask.created_at).toLocaleDateString()}</span>}
+              </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
-              <X className="h-4 w-4" />
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive h-8 w-8"
+              onClick={handleDelete}
+            >
+              <Trash2 className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setOpen(false)}
+            >
+              <X className="size-5" />
             </Button>
           </div>
-        </DialogHeader>
+        </div>
 
-        <div className="space-y-6 mt-4">
-          {/* Error Alert */}
-          {error && (
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
-          )}
+        <div className="flex-1 overflow-hidden flex">
+          {/* LEFT COLUMN: Properties */}
+          <div className="w-[240px] shrink-0 border-r overflow-y-auto bg-muted/5 p-4 space-y-5">
 
-          {/* Metadata Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <MetadataRow icon="📅" label="Due Date">
-              <DatePicker
-                value={localTask.due_date}
-                onChange={(date) => handleFieldChange("due_date", date, true)}
-                placeholder="No due date"
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="🏁" label="Start Date">
-              <DatePicker
-                value={localTask.start_date}
-                onChange={(date) => handleFieldChange("start_date", date, true)}
-                placeholder="No start date"
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="⭐" label="Priority">
-              <PrioritySelect
-                value={localTask.ticktick_priority || 0}
-                onChange={(priority) => handleFieldChange("ticktick_priority", priority, true)}
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="🗂️" label="Project">
-              <ProjectSelector
-                value={localTask.project_id ?? null}
-                onChange={(projectId, project) => {
-                  handleFieldChange("project_id", projectId, true)
-                  handleFieldChange("project_name", project?.name || null, true)
-                  handleFieldChange("ticktick_project_id", project?.ticktick_project_id || null, true)
-                }}
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="🔔" label="Reminder">
-              <DatePicker
-                value={localTask.reminder_time}
-                onChange={(date) => handleFieldChange("reminder_time", date, true)}
-                placeholder="No reminder"
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="🔁" label="Repeat">
-              <RepeatPatternSelect
-                value={localTask.repeat_flag}
-                onChange={(pattern) => handleFieldChange("repeat_flag", pattern, true)}
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="⏱️" label="Time Estimate">
-              <TimeEstimateInput
-                value={localTask.time_estimate ?? null}
-                onChange={(minutes) => handleFieldChange("time_estimate", minutes, true)}
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="☀️" label="All Day">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(localTask.all_day)}
-                  onCheckedChange={(checked) => handleFieldChange("all_day", Boolean(checked), true)}
-                />
-                <span className="text-sm text-muted-foreground">All day</span>
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Layout className="size-3" /> Properties
+              </h3>
+              <div className="grid gap-3 pl-1">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Priority</label>
+                  <PrioritySelect
+                    value={localTask.ticktick_priority || 0}
+                    onChange={(priority) => handleFieldChange("ticktick_priority", priority, true)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Project</label>
+                  <ProjectSelector
+                    value={localTask.project_id ?? null}
+                    onChange={(projectId, project) => {
+                      handleFieldChange("project_id", projectId, true)
+                      handleFieldChange("project_name", project?.name || null, true)
+                      handleFieldChange("ticktick_project_id", project?.ticktick_project_id || null, true)
+                    }}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Tags</label>
+                  <TagsInput
+                    value={localTask.ticktick_tags || []}
+                    onChange={(tags) => handleFieldChange("ticktick_tags", tags, true)}
+                    placeholder="Add tags..."
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Time Estimate</label>
+                  <TimeEstimateInput
+                    value={localTask.time_estimate ?? null}
+                    onChange={(minutes) => handleFieldChange("time_estimate", minutes, true)}
+                  />
+                </div>
               </div>
-            </MetadataRow>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-dashed">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Calendar className="size-3" /> Schedule
+              </h3>
+              <div className="grid gap-3 pl-1">
+                {/* Stack dates vertically to prevent overlap */}
+                <div className="space-y-3">
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Due By</label>
+                    <DatePickerWithOptionalTime
+                      value={localTask.due_date}
+                      onChange={(date) => handleFieldChange("due_date", date, true)}
+                      placeholder="Set due date..."
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Start Date</label>
+                    <DatePickerWithOptionalTime
+                      value={localTask.start_date}
+                      onChange={(date) => handleFieldChange("start_date", date, true)}
+                      placeholder="Set start date..."
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Reminder</label>
+                    <DatePickerWithOptionalTime
+                      value={localTask.reminder_time}
+                      onChange={(date) => handleFieldChange("reminder_time", date, true)}
+                      placeholder="Set reminder..."
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {effectiveQuadrant && (
+              <div className="pt-2 border-t border-dashed">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground text-xs font-medium">Quadrant:</span>
+                  <Badge variant="outline" className="font-mono">{effectiveQuadrant}</Badge>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Tags */}
-          <div>
-            <label className="text-sm text-muted-foreground mb-2 block">Tags</label>
-            <TagsInput
-              value={localTask.ticktick_tags || []}
-              onChange={(tags) => handleFieldChange("ticktick_tags", tags, true)}
-              placeholder="Add tags..."
-            />
+          {/* RIGHT COLUMN: Description Editor + AI Suggestions */}
+          <div className="flex-1 flex flex-col h-full bg-background relative min-w-0">
+            {/* Collapsible Description */}
+            <div className="flex-1 overflow-hidden">
+              <CollapsibleDescription
+                value={localTask.description || ""}
+                onChange={(val) => handleFieldChange("description", val)}
+              />
+            </div>
+
+            {/* AI Suggestions Section */}
+            <div className="border-t p-4 space-y-3">
+              {suggestions.length === 0 && !enhancing && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={handleEnhance}
+                >
+                  <Sparkles className="size-4" />
+                  Get AI suggestions
+                </Button>
+              )}
+
+              {enhancing && (
+                <div className="space-y-2 py-4">
+                  <div className="h-3 bg-muted/20 animate-pulse rounded w-3/4" />
+                  <div className="h-3 bg-muted/20 animate-pulse rounded w-1/2" />
+                  <p className="text-xs text-center text-muted-foreground animate-pulse mt-2">
+                    Analyzing...
+                  </p>
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
+                  {rationale && (
+                    <div className="bg-muted p-2 rounded text-xs italic text-muted-foreground">
+                      {rationale}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {suggestions.map(s => (
+                      <div
+                        key={s.id}
+                        className="bg-muted/50 p-2 rounded text-sm border"
+                      >
+                        <span className="font-medium text-xs text-muted-foreground">
+                          {s.label}:
+                        </span>{" "}
+                        <span className="text-sm">{s.displayValue}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    onClick={applySuggestions}
+                    className="w-full gap-2"
+                  >
+                    <Sparkles className="size-4" />
+                    Apply all suggestions
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Description with Markdown Support */}
-          <MarkdownEditor
-            value={localTask.description || ""}
-            onChange={(desc) => handleFieldChange("description", desc)}
-            placeholder="Add a description..."
-          />
+        </div>
 
-          {/* AI Analysis Section */}
-          <div className="border-t pt-4">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <span className="text-lg">🤖</span>
-              AI Analysis
-            </h3>
-
-            {/* Analyze buttons */}
-            {!analyzing && (
-              <div className="grid grid-cols-1 gap-2">
-                <Button onClick={handleAnalyze} variant="secondary" className="w-full" type="button">
-                  ⚡ Analyze
+            {error && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-destructive text-destructive-foreground px-4 py-2 rounded-full text-sm shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-4 z-[70]">
+                <AlertCircle className="size-4" />
+                {error}
+                <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full hover:bg-white/20" onClick={() => setError(null)}>
+                  <X className="size-3" />
                 </Button>
               </div>
             )}
-
-            {/* Show analyzing state */}
-            {analyzing && (
-              <div className="text-center py-4">
-                <p className="text-muted-foreground">🤔 Analyzing task...</p>
-              </div>
-            )}
-
-            {/* Show suggestions if available */}
-            {displayedSuggestions.length > 0 && (
-              <SuggestionPanel
-                suggestions={displayedSuggestions}
-                onApprove={handleApproveSuggestion}
-                onReject={handleRejectSuggestion}
-              />
-            )}
-
-            {/* Show existing analysis */}
-            {localTask.urgency_score !== undefined && localTask.importance_score !== undefined && (
-              <div className="space-y-3 bg-muted/50 p-4 rounded-lg mt-3">
-                {effectiveQuadrant && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Quadrant:</span>
-                    <Badge variant="outline">{effectiveQuadrant}</Badge>
-                    {localTask.manual_quadrant_override && (
-                      <Badge variant="secondary" className="text-xs">
-                        Manual Override
-                      </Badge>
-                    )}
-                  </div>
-                )}
-
-                {localTask.urgency_score !== undefined && localTask.importance_score !== undefined && (
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Urgency:</span>
-                      <span className="ml-2 font-medium">{localTask.urgency_score}/10</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Importance:</span>
-                      <span className="ml-2 font-medium">{localTask.importance_score}/10</span>
-                    </div>
-                  </div>
-                )}
-
-                {localTask.analysis_reasoning && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Reasoning:</p>
-                    <p className="text-sm leading-relaxed">{localTask.analysis_reasoning}</p>
-                  </div>
-                )}
-
-                {/* Re-analyze button */}
-                {!analyzing && (
-                  <Button
-                    onClick={handleAnalyze}
-                    variant="ghost"
-                    size="sm"
-                    className="w-full mt-2"
-                  >
-                    🔄 Re-analyze
-                  </Button>
-                )}
-              </div>
-            )}
           </div>
-
-          {/* Footer Actions */}
-          <div className="flex justify-between items-center pt-4 border-t">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleDelete}
-              disabled={saving}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </Button>
-
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {saving && <span>Saving...</span>}
-              {localTask.created_at && (
-                <span>Created {new Date(localTask.created_at).toLocaleDateString()}</span>
-              )}
-              {localTask.ticktick_task_id && (
-                <Badge variant="outline" className="text-xs">
-                  TickTick
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </>,
+        document.body
+      )}
+    </>
   )
 }

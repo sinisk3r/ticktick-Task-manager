@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { QuadrantPicker } from "./QuadrantPicker";
 import { TaskDetailPopover } from "./TaskDetailPopover";
-import { DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/api";
@@ -67,11 +66,9 @@ export function UnsortedTaskCard({
             onUpdate={onUpdate}
             onDelete={onDelete}
             trigger={
-              <DialogTrigger asChild>
-                <h3 className="text-lg font-semibold text-foreground mb-1 cursor-pointer hover:text-primary transition-colors">
-                  {task.title}
-                </h3>
-              </DialogTrigger>
+              <h3 className="text-lg font-semibold text-foreground mb-1 cursor-pointer hover:text-primary transition-colors">
+                {task.title}
+              </h3>
             }
           />
           {task.description && (

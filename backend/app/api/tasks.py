@@ -2,7 +2,7 @@
 Task CRUD API endpoints with LLM analysis integration.
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, delete
@@ -19,6 +19,7 @@ from app.models.profile import Profile
 from app.services import OllamaService
 from app.services.ticktick import ticktick_service
 from app.services.prompt_utils import build_profile_context
+from app.services.llm_ollama import OllamaService as OllamaSuggestionService
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -191,6 +192,36 @@ class TaskListResponse(BaseModel):
     total: int
 
 
+class TaskSummaryResponse(BaseModel):
+    """Aggregated counts for tasks and quadrants."""
+    total: int
+    total_active: int
+    total_completed: int
+    total_deleted: int
+    quadrants: Dict[str, int]
+
+
+class EnhanceRequest(BaseModel):
+    """Toggle which parts of the task should be enhanced."""
+    enhance_description: bool = Field(True, description="Suggest a tighter description")
+    enhance_dates: bool = Field(True, description="Suggest dates/reminders")
+    enhance_project: bool = Field(True, description="Suggest project alignment")
+    enhance_time: bool = Field(True, description="Suggest time estimate/focus windows")
+
+
+class EnhanceResponse(BaseModel):
+    """Structured enhancement suggestions (no automatic mutation)."""
+    suggested_description: Optional[str] = None
+    suggested_due: Optional[datetime] = None
+    suggested_start: Optional[datetime] = None
+    suggested_reminder: Optional[datetime] = None
+    suggested_project: Optional[Dict[str, Any]] = None
+    suggested_tags: Optional[List[str]] = None
+    suggested_time_estimate: Optional[int] = None
+    rationale: Optional[str] = None
+    raw_suggestions: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 async def _get_profile_context(user_id: int, db: AsyncSession) -> Optional[str]:
     """Return a compact, bulletized profile string for the given user."""
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
@@ -273,6 +304,11 @@ async def list_tasks(
     user_id: int = Query(..., gt=0, description="User ID to filter tasks"),
     status: Optional[TaskStatus] = Query(None, description="Filter by task status"),
     quadrant: Optional[EisenhowerQuadrant] = Query(None, description="Filter by Eisenhower quadrant"),
+    search: Optional[str] = Query(None, description="Full-text search across title/description/project"),
+    project_id: Optional[int] = Query(None, description="Filter by project id"),
+    tag: Optional[str] = Query(None, description="Filter by TickTick tag"),
+    due_before: Optional[datetime] = Query(None, description="Filter tasks with due_date before this ISO timestamp"),
+    due_after: Optional[datetime] = Query(None, description="Filter tasks with due_date after this ISO timestamp"),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of tasks to return"),
     offset: int = Query(0, ge=0, description="Number of tasks to skip"),
     db: AsyncSession = Depends(get_db)
@@ -284,6 +320,10 @@ async def list_tasks(
     - user_id: Required - filter tasks by user
     - status: Optional - filter by task status (active, completed, deleted)
     - quadrant: Optional - filter by Eisenhower quadrant (Q1, Q2, Q3, Q4)
+    - search: Optional - full-text search on title/description/project_name
+    - project_id: Optional - filter by project id
+    - tag: Optional - filter by TickTick tag (exact match)
+    - due_before/due_after: Optional - filter by due date window
     - limit: Maximum number of tasks to return (default 100, max 500)
     - offset: Number of tasks to skip for pagination (default 0)
     """
@@ -299,6 +339,28 @@ async def list_tasks(
             _effective_quadrant_expression(quadrant)
         )
 
+    if search:
+        like_pattern = f"%{search.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(Task.title).like(like_pattern),
+                func.lower(Task.description).like(like_pattern),
+                func.lower(Task.project_name).like(like_pattern),
+            )
+        )
+
+    if project_id is not None:
+        query = query.where(Task.project_id == project_id)
+
+    if tag:
+        query = query.where(Task.ticktick_tags.contains([tag]))
+
+    if due_before:
+        query = query.where(Task.due_date.isnot(None)).where(Task.due_date <= due_before)
+
+    if due_after:
+        query = query.where(Task.due_date.isnot(None)).where(Task.due_date >= due_after)
+
     # Order by created_at descending (newest first)
     query = query.order_by(
         Task.manual_order.asc().nullslast(),
@@ -306,16 +368,33 @@ async def list_tasks(
     )
 
     # Count total before pagination
-    count_query = select(Task.id).where(Task.user_id == user_id)
+    count_query = select(func.count()).select_from(Task).where(Task.user_id == user_id)
     if status:
         count_query = count_query.where(Task.status == status)
     if quadrant:
         count_query = count_query.where(
             _effective_quadrant_expression(quadrant)
         )
+    if search:
+        like_pattern = f"%{search.lower()}%"
+        count_query = count_query.where(
+            or_(
+                func.lower(Task.title).like(like_pattern),
+                func.lower(Task.description).like(like_pattern),
+                func.lower(Task.project_name).like(like_pattern),
+            )
+        )
+    if project_id is not None:
+        count_query = count_query.where(Task.project_id == project_id)
+    if tag:
+        count_query = count_query.where(Task.ticktick_tags.contains([tag]))
+    if due_before:
+        count_query = count_query.where(Task.due_date.isnot(None)).where(Task.due_date <= due_before)
+    if due_after:
+        count_query = count_query.where(Task.due_date.isnot(None)).where(Task.due_date >= due_after)
 
-    result_count = await db.execute(count_query)
-    total = len(result_count.all())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
 
     # Apply pagination
     query = query.limit(limit).offset(offset)
@@ -325,6 +404,174 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return TaskListResponse(tasks=tasks, total=total)
+
+
+@router.get("/summary", response_model=TaskSummaryResponse)
+async def summarize_tasks(
+    user_id: int = Query(..., gt=0, description="User ID to summarize tasks"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return aggregate counts for tasks by status and effective quadrant (active tasks only).
+    """
+    # Fetch once and aggregate in memory for clarity
+    result = await db.execute(select(Task).where(Task.user_id == user_id))
+    tasks = result.scalars().all()
+
+    total = len(tasks)
+    status_counts = {
+        "active": 0,
+        "completed": 0,
+        "deleted": 0,
+    }
+    quadrant_counts = {"Q1": 0, "Q2": 0, "Q3": 0, "Q4": 0}
+
+    for task in tasks:
+        status_counts[task.status.value] = status_counts.get(task.status.value, 0) + 1
+        if task.status == TaskStatus.ACTIVE:
+            effective = task.manual_quadrant_override or task.eisenhower_quadrant
+            if effective and effective.value in quadrant_counts:
+                quadrant_counts[effective.value] += 1
+
+    return TaskSummaryResponse(
+        total=total,
+        total_active=status_counts["active"],
+        total_completed=status_counts["completed"],
+        total_deleted=status_counts["deleted"],
+        quadrants=quadrant_counts,
+    )
+
+
+@router.post("/{task_id}/enhance", response_model=EnhanceResponse)
+async def enhance_task(
+    task_id: int,
+    payload: EnhanceRequest,
+    user_id: int = Query(..., gt=0, description="User ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate structured enhancement suggestions for a task without mutating it.
+
+    Returns a concise payload for the UI to review/apply (description, dates,
+    reminder, project, tags, and time estimate). This reuses the modern
+    TickTick-backed suggestion pipeline (no legacy AI calls).
+    """
+    task_result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
+    task = task_result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Build context for suggestions
+    task_data = {
+        "title": task.title,
+        "description": task.description,
+        "due_date": task.due_date,
+        "start_date": task.start_date,
+        "ticktick_priority": task.ticktick_priority,
+        "project_name": task.project_name,
+        "ticktick_tags": task.ticktick_tags or [],
+        "repeat_flag": task.repeat_flag,
+        "reminder_time": task.reminder_time,
+        "time_estimate": task.time_estimate,
+        "all_day": task.all_day,
+    }
+
+    suggestion_service = OllamaSuggestionService()
+
+    from app.services.workload_calculator import (
+        calculate_user_workload,
+        get_project_context,
+        get_related_tasks,
+    )
+
+    workload = await calculate_user_workload(user_id, db)
+    project_context = await get_project_context(task.project_id, db) if task.project_id else None
+    related_tasks = await get_related_tasks(task_id, task.project_id, db) if task.project_id else []
+
+    suggestion_result = await suggestion_service.generate_suggestions(
+        task_data=task_data,
+        project_context=project_context,
+        related_tasks=related_tasks,
+        user_workload=workload,
+        stream=False,
+    )
+
+    suggestions = suggestion_result.get("suggestions", []) or []
+
+    suggested_description: Optional[str] = None
+    suggested_due: Optional[datetime] = None
+    suggested_start: Optional[datetime] = None
+    suggested_reminder: Optional[datetime] = None
+    suggested_project: Optional[Dict[str, Any]] = None
+    suggested_tags: Optional[List[str]] = None
+    suggested_time_estimate: Optional[int] = None
+    rationales: List[str] = []
+
+    for s in suggestions:
+        s_type = s.get("type")
+        reason = s.get("reason")
+        if reason:
+            rationales.append(reason)
+
+        if s_type == "time_estimate" and payload.enhance_time:
+            try:
+                suggested_time_estimate = int(s.get("suggested")) if s.get("suggested") is not None else None
+            except (TypeError, ValueError):
+                suggested_time_estimate = None
+
+        elif s_type == "reminder_time" and payload.enhance_dates:
+            raw = s.get("suggested")
+            if raw:
+                cleaned = str(raw).replace("Z", "+00:00")
+                try:
+                    suggested_reminder = datetime.fromisoformat(cleaned)
+                except ValueError:
+                    suggested_reminder = None
+
+        elif s_type == "start_date" and payload.enhance_dates:
+            raw = s.get("suggested")
+            if raw:
+                cleaned = str(raw).replace("Z", "+00:00")
+                try:
+                    suggested_start = datetime.fromisoformat(cleaned)
+                except ValueError:
+                    suggested_start = None
+
+        elif s_type == "project" and payload.enhance_project:
+            suggested = s.get("suggested")
+            if isinstance(suggested, dict):
+                suggested_project = suggested
+            else:
+                suggested_project = {"name": suggested, "label": suggested}
+
+        elif s_type == "tags":
+            suggested_tags = s.get("suggested")
+
+        elif s_type == "subtasks" and payload.enhance_description and not suggested_description:
+            subtasks = s.get("suggested") or []
+            if isinstance(subtasks, list) and subtasks:
+                suggested_description = (task.description or "") + "\n\n" + "\n".join(f"- {item}" for item in subtasks)
+
+    if not suggested_project and payload.enhance_project and not task.project_name:
+        suggested_project = {
+            "name": "Create Project",
+            "label": "Suggested new project from title",
+            "ticktick_project_id": None,
+        }
+
+    rationale_text = "; ".join(rationales) if rationales else None
+
+    return EnhanceResponse(
+        suggested_description=suggested_description,
+        suggested_due=suggested_due,
+        suggested_start=suggested_start,
+        suggested_reminder=suggested_reminder,
+        suggested_project=suggested_project,
+        suggested_tags=suggested_tags,
+        suggested_time_estimate=suggested_time_estimate,
+        rationale=rationale_text,
+        raw_suggestions=suggestions,
+    )
 
 
 class ReorderRequest(BaseModel):

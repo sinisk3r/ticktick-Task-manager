@@ -13,6 +13,7 @@ import {
   Inbox,
   ListTodo,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -59,6 +60,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
     { refreshInterval: 10000 }
   );
   const unsortedCount = unsortedData?.total || 0;
+
+  const { data: taskSummary } = useSWR(
+    `${API_BASE}/api/tasks/summary?user_id=1`,
+    fetcher,
+    { refreshInterval: 15000 }
+  );
 
   // Handle TickTick sync
   const handleSync = async () => {
@@ -107,6 +114,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
       href: "/tasks",
       icon: CheckSquare,
       variant: "default",
+      badge: taskSummary?.total_active,
     },
     {
       title: "List View",
@@ -120,6 +128,13 @@ export function Sidebar({ isOpen, setIsOpen, isMobile }: SidebarProps) {
       icon: Inbox,
       variant: "default",
       badge: unsortedCount > 0 ? unsortedCount : undefined,
+    },
+    {
+      title: "Bin",
+      href: "/tasks?status=deleted",
+      icon: Trash2,
+      variant: "default",
+      badge: taskSummary?.total_deleted,
     },
     {
       title: "Simple View",

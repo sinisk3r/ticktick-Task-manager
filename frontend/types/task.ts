@@ -35,6 +35,14 @@ export interface TasksResponse {
   total: number
 }
 
+export interface TaskSummary {
+  total: number
+  total_active: number
+  total_completed: number
+  total_deleted: number
+  quadrants: Record<string, number>
+}
+
 export interface Suggestion {
   id: number
   type: string
@@ -46,4 +54,35 @@ export interface Suggestion {
 
 export interface SuggestionsResponse {
   suggestions: Suggestion[]
+}
+
+// Enhance endpoint types
+export interface EnhanceRequest {
+  enhance_description?: boolean
+  enhance_dates?: boolean
+  enhance_project?: boolean
+  enhance_time?: boolean
+}
+
+export interface EnhanceResponse {
+  suggested_description?: string | null
+  suggested_due?: string | null
+  suggested_start?: string | null
+  suggested_reminder?: string | null
+  suggested_project?: {
+    name?: string
+    label?: string
+    id?: number
+    ticktick_project_id?: string | null
+  } | null
+  suggested_tags?: string[] | null
+  suggested_time_estimate?: number | null
+  rationale?: string | null
+  raw_suggestions?: Array<{
+    type: string
+    current?: any
+    suggested?: any
+    reason?: string
+    confidence?: number
+  }>
 }

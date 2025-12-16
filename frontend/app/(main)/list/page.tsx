@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Search, Plus, AlertCircle, Star, Trash2 } from "lucide-react"
-import { DialogTrigger } from "@/components/ui/dialog"
 import { api, API_BASE } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { getQuadrant } from "@/lib/taskUtils"
@@ -350,12 +349,10 @@ export default function ListView() {
                         onUpdate={handleTaskUpdate}
                         onDelete={handleTaskDelete}
                         trigger={
-                          <DialogTrigger asChild>
-                            <ListTaskCard
-                              task={task}
-                              onToggleStatus={handleToggleStatus}
-                            />
-                          </DialogTrigger>
+                          <ListTaskCard
+                            task={task}
+                            onToggleStatus={handleToggleStatus}
+                          />
                         }
                       />
                     </motion.div>

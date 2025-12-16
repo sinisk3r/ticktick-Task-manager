@@ -4,7 +4,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { ChatPanel } from "@/components/ChatPanel";
 import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 export default function MainLayout({
     children,
@@ -15,6 +15,25 @@ export default function MainLayout({
     const [isMobile, setIsMobile] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const pathname = usePathname();
+
+    const searchParams = useSearchParams();
+
+    // Determine title
+    let title = "Dashboard";
+    if (pathname === "/tasks") {
+        const status = searchParams.get("status");
+        title = status === "deleted" ? "Bin" : "My Tasks";
+    } else if (pathname === "/list") {
+        title = "List View";
+    } else if (pathname === "/unsorted") {
+        title = "Unsorted";
+    } else if (pathname === "/simple") {
+        title = "Simple View";
+    } else if (pathname.startsWith("/analyze")) {
+        title = "Analyze Task";
+    } else if (pathname.startsWith("/settings")) {
+        title = "Settings";
+    }
 
     useEffect(() => {
         const checkMobile = () => {
@@ -47,6 +66,7 @@ export default function MainLayout({
                     onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
                     onChatToggle={() => setIsChatOpen(!isChatOpen)}
                     chatOpen={isChatOpen}
+                    title={title}
                 />
 
                 <div className="flex flex-1 overflow-hidden">
@@ -57,9 +77,8 @@ export default function MainLayout({
                     </main>
 
                     <div
-                        className={`relative h-full transition-all duration-200 ${
-                            isChatOpen ? (isMobile ? "w-full" : "w-[360px]") : "w-0"
-                        }`}
+                        className={`relative h-full transition-all duration-200 ${isChatOpen ? (isMobile ? "w-full" : "w-[360px]") : "w-0"
+                            }`}
                     >
                         <ChatPanel
                             isOpen={isChatOpen}

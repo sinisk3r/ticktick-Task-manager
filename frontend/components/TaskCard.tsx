@@ -3,49 +3,47 @@
 import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { TaskDetailPopover } from "@/components/TaskDetailPopover"
-import { DialogTrigger } from "@/components/ui/dialog"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { ChevronDown, ChevronUp, CheckCircle2, Calendar as CalendarIcon, Folder, Clock } from "lucide-react"
 import { Task } from "@/types/task"
 import { RepeatBadge } from "@/components/metadata/RepeatBadge"
 import { TimeEstimateBadge } from "@/components/metadata/TimeEstimateBadge"
 import { formatMinutes } from "@/components/metadata/time"
+import { DescriptionPreview } from "@/components/DescriptionPreview"
+import { motion } from "framer-motion"
+import { format, isToday, isTomorrow, isPast } from "date-fns"
 
 interface TaskCardProps {
   task: Task
   onUpdate?: (task: Task) => void
   onDelete?: (taskId: number) => void
+  onToggleStatus?: (task: Task) => void
 }
 
 const getQuadrantConfig = (quadrant: string) => {
   const configs = {
     Q1: {
       label: "Q1: Urgent & Important",
-      bgColor: "bg-red-100 dark:bg-red-900/20",
-      borderColor: "border-red-200 dark:border-red-800",
+      leftBorderColor: "border-l-red-500",
       badgeVariant: "destructive" as const,
       icon: "🔴",
     },
     Q2: {
       label: "Q2: Not Urgent, Important",
-      bgColor: "bg-green-100 dark:bg-green-900/20",
-      borderColor: "border-green-200 dark:border-green-800",
+      leftBorderColor: "border-l-green-500",
       badgeVariant: "default" as const,
       icon: "🟢",
     },
     Q3: {
       label: "Q3: Urgent, Not Important",
-      bgColor: "bg-yellow-100 dark:bg-yellow-900/20",
-      borderColor: "border-yellow-200 dark:border-yellow-800",
+      leftBorderColor: "border-l-yellow-500",
       badgeVariant: "secondary" as const,
       icon: "🟡",
     },
     Q4: {
       label: "Q4: Neither",
-      bgColor: "bg-blue-100 dark:bg-blue-900/20",
-      borderColor: "border-blue-200 dark:border-blue-800",
+      leftBorderColor: "border-l-blue-500",
       badgeVariant: "outline" as const,
       icon: "🔵",
     },
@@ -53,12 +51,13 @@ const getQuadrantConfig = (quadrant: string) => {
   return configs[quadrant as keyof typeof configs] || configs.Q4
 }
 
-export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
+export function TaskCard({ task, onUpdate, onDelete, onToggleStatus }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false)
   const effectiveQuadrant =
     task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant || "Q4"
   const quadrantConfig = getQuadrantConfig(effectiveQuadrant)
   const manualOverride = Boolean(task.manual_quadrant_override)
+  const isCompleted = task.status === "completed"
 
   // Truncate description to 100 characters
   const truncatedDescription = task.description
@@ -93,10 +92,9 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
       onUpdate={onUpdate}
       onDelete={onDelete}
       trigger={
-        <DialogTrigger asChild>
-          <Card
-            className={`p-4 border-2 ${quadrantConfig.borderColor} ${quadrantConfig.bgColor} transition-all hover:shadow-lg cursor-pointer`}
-          >
+        <Card
+          className={`p-4 border-l-4 ${quadrantConfig.leftBorderColor} transition-all hover:shadow-lg cursor-pointer`}
+        >
             {/* Quadrant Badge */}
             <div className="mb-3">
               <Badge variant={quadrantConfig.badgeVariant} className="text-sm">
@@ -109,39 +107,46 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
               )}
             </div>
 
-            {/* Task Title */}
-            <h3 className="text-lg font-semibold mb-2 text-foreground">
-              {task.title}
-            </h3>
-
-            {/* Task Description */}
-            <p className="text-sm text-muted-foreground mb-4">{truncatedDescription}</p>
-
-            {/* Urgency Score */}
-            {task.urgency_score !== undefined && (
-              <div className="mb-3">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-muted-foreground">Urgency</span>
-                  <span className="text-xs font-semibold text-foreground">
-                    {task.urgency_score}/10
-                  </span>
+            {/* Task Title + status toggle */}
+            <div className="flex items-start gap-2">
+              <Button
+                variant={isCompleted ? "secondary" : "ghost"}
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onToggleStatus?.(task)
+                }}
+              >
+                <CheckCircle2 className={`h-4 w-4 ${isCompleted ? "text-primary" : "text-muted-foreground"}`} />
+              </Button>
+              <div className="flex-1">
+                <div className="relative inline-block">
+                  <h3 className={`text-lg font-semibold mb-1 ${isCompleted ? "text-muted-foreground" : "text-foreground"}`}>
+                    {task.title}
+                  </h3>
+                  <motion.div
+                    initial={false}
+                    animate={{ width: isCompleted ? "100%" : "0%" }}
+                    transition={{ duration: 0.4, ease: "easeInOut" }}
+                    className="absolute top-[14px] left-0 h-[2px] bg-primary/60 pointer-events-none"
+                    style={{ transformOrigin: "left center" }}
+                  />
                 </div>
-                <Progress value={task.urgency_score * 10} className="h-2" />
-              </div>
-            )}
 
-            {/* Importance Score */}
-            {task.importance_score !== undefined && (
-              <div className="mb-4">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-muted-foreground">Importance</span>
-                  <span className="text-xs font-semibold text-foreground">
-                    {task.importance_score}/10
-                  </span>
-                </div>
-                <Progress value={task.importance_score * 10} className="h-2" />
+                {/* Task Description */}
+                <p className="text-sm text-muted-foreground mb-2">{truncatedDescription}</p>
+
+                {/* Description Preview with Checkboxes */}
+                {task.description && (
+                  <div className="mt-2">
+                    <DescriptionPreview markdown={task.description} maxLines={2} />
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+
 
             {/* AI Reasoning */}
             <div className="border-t border-border pt-3">
@@ -203,19 +208,49 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
 
             {/* Metadata badges */}
             <div className="flex flex-wrap gap-2 mt-3">
+              {/* Due date with time */}
+              {task.due_date && (() => {
+                const dueDate = new Date(task.due_date)
+                const hasTime = dueDate.getHours() !== 0 || dueDate.getMinutes() !== 0
+                const isOverdue = isPast(dueDate) && !isToday(dueDate)
+                const dueDateText = isToday(dueDate) ? "Today" : isTomorrow(dueDate) ? "Tomorrow" : format(dueDate, "MMM d")
+
+                return (
+                  <Badge
+                    variant={isOverdue ? "destructive" : isToday(dueDate) ? "default" : "outline"}
+                    className="text-xs gap-1"
+                  >
+                    <CalendarIcon className="size-3" />
+                    {dueDateText}
+                    {hasTime && (
+                      <span className="opacity-70 ml-0.5">
+                        {format(dueDate, "h:mm a")}
+                      </span>
+                    )}
+                  </Badge>
+                )
+              })()}
+
+              {/* Project */}
               {task.project_name && (
-                <Badge variant="outline" className="text-xs">
-                  🗂️ {task.project_name}
+                <Badge variant="outline" className="text-xs gap-1">
+                  <Folder className="size-3" />
+                  {task.project_name}
                 </Badge>
               )}
+
+              {/* Time estimate */}
+              {typeof task.time_estimate === "number" && (
+                <Badge variant="secondary" className="text-xs gap-1">
+                  <Clock className="size-3" />
+                  {formatMinutes(task.time_estimate)}
+                </Badge>
+              )}
+
+              {/* Other metadata */}
               {priorityLabel(task.ticktick_priority) && (
                 <Badge variant="secondary" className="text-xs">
                   ⭐ {priorityLabel(task.ticktick_priority)}
-                </Badge>
-              )}
-              {task.due_date && (
-                <Badge variant="outline" className="text-xs">
-                  📅 Due {formatDate(task.due_date)}
                 </Badge>
               )}
               {task.start_date && (
@@ -229,9 +264,6 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
                 </Badge>
               )}
               {task.repeat_flag && <RepeatBadge pattern={task.repeat_flag} />}
-              {typeof task.time_estimate === "number" && (
-                <TimeEstimateBadge minutes={task.time_estimate} />
-              )}
               {task.ticktick_tags?.map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-xs">
                   #{tag}
@@ -244,7 +276,6 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
               ) : null}
             </div>
           </Card>
-        </DialogTrigger>
       }
     />
   )
