@@ -26,3 +26,4 @@ def downgrade() -> None:
     op.drop_column('tasks', 'manual_order')
 
 
+

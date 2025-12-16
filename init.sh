@@ -33,6 +33,10 @@ log_warn() {
   echo "$@"
 }
 
+log_error() {
+  echo "$@" >&2
+}
+
 # Port configuration file
 PORT_CONFIG_FILE="$ROOT_DIR/.ports.json"
 ENV_FILE="$ROOT_DIR/.env.runtime"
@@ -388,22 +392,15 @@ start_backend() {
   if check_port "$backend_port"; then
     log_info "[init] Port $backend_port is occupied"
 
-    # Try to kill the owner or find a new port
+    # Try to kill the owner, but do NOT auto-assign a new port
     if kill_port_owner "$backend_port" "backend"; then
       log_info "[init] Port $backend_port freed, proceeding with backend startup"
     else
-      log_warn "[init] Finding alternative port for backend..."
-      local new_port
-      new_port=$(find_available_port $((backend_port + 1)))
-
-      if [[ -z "$new_port" ]]; then
-        log_warn "[init] Cannot start backend - no available ports"
-        exit 1
-      fi
-
-      backend_port=$new_port
-      set_configured_port "backend" "$backend_port"
-      log_warn "[init] Backend will use port $backend_port"
+      log_warn "[init] ERROR: Port $backend_port is occupied and could not be freed"
+      log_warn "[init] Please manually kill the process using port $backend_port:"
+      log_warn "[init]   lsof -ti:$backend_port | xargs kill -9"
+      log_warn "[init] Or choose a different port in .ports.json"
+      exit 1
     fi
   fi
 
@@ -474,22 +471,15 @@ start_frontend() {
   if check_port "$frontend_port"; then
     log_info "[init] Port $frontend_port is occupied"
 
-    # Try to kill the owner or find a new port
+    # Try to kill the owner, but do NOT auto-assign a new port
     if kill_port_owner "$frontend_port" "frontend"; then
       log_info "[init] Port $frontend_port freed, proceeding with frontend startup"
     else
-      log_warn "[init] Finding alternative port for frontend..."
-      local new_port
-      new_port=$(find_available_port $((frontend_port + 1)))
-
-      if [[ -z "$new_port" ]]; then
-        log_warn "[init] Cannot start frontend - no available ports"
-        exit 1
-      fi
-
-      frontend_port=$new_port
-      set_configured_port "frontend" "$frontend_port"
-      log_warn "[init] Frontend will use port $frontend_port"
+      log_error "[init] ERROR: Port $frontend_port is occupied and could not be freed"
+      log_error "[init] Please manually kill the process using port $frontend_port:"
+      log_error "[init]   lsof -ti:$frontend_port | xargs kill -9"
+      log_error "[init] Or choose a different port in .ports.json"
+      exit 1
     fi
   fi
 

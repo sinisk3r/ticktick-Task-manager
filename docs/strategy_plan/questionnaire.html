@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Context - Strategy Builder</title>
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Layout: Form (60%) + Chat (40%) */
+        .form-container {
+            width: 60%;
+            overflow-y: auto;
+            padding: 40px;
+        }
+
+        .chat-container {
+            width: 40%;
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            background: var(--surface);
+        }
+
+        /* Header */
+        header {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        h1 { font-size: 2rem; margin-bottom: 8px; color: #0f172a; }
+        .subtitle { color: #64748b; font-size: 0.95rem; }
+
+        /* Form sections */
+        section {
+            background: var(--surface);
+            padding: 24px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        h2 {
+            font-size: 1.3rem;
+            color: var(--primary);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--bg);
+        }
+
+        .form-group { margin-bottom: 20px; }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: #334155;
+            font-size: 0.9rem;
+        }
+
+        .help-text {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        textarea { min-height: 80px; resize: vertical; }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .checkbox-item:hover { background: #f1f5f9; }
+
+        .checkbox-item input[type="checkbox"] {
+            margin-top: 4px;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .chip {
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chip:hover {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        /* Chat Panel */
+        .chat-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            background: #f8fafc;
+        }
+
+        .chat-header h3 {
+            font-size: 1rem;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .api-config {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .api-config input {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 0.8rem;
+        }
+
+        .api-config button {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            padding: 10px 12px;
+            border-radius: 8px;
+            max-width: 90%;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            background: var(--primary);
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .message.assistant {
+            background: #f1f5f9;
+            color: var(--text);
+            align-self: flex-start;
+        }
+
+        /* Markdown formatting in assistant messages */
+        .message.assistant h1, .message.assistant h2, .message.assistant h3 {
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .message.assistant h3 {
+            font-size: 1rem;
+            color: var(--primary);
+        }
+
+        .message.assistant ul, .message.assistant ol {
+            margin-left: 20px;
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+
+        .message.assistant li {
+            margin-bottom: 4px;
+        }
+
+        .message.assistant strong {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .message.assistant code {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+
+        .message.assistant p {
+            margin-bottom: 8px;
+        }
+
+        .message.system {
+            background: #fef3c7;
+            color: #92400e;
+            align-self: center;
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        .chat-input-area {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input-area textarea {
+            flex: 1;
+            min-height: 60px;
+            max-height: 120px;
+            resize: vertical;
+            font-size: 0.85rem;
+        }
+
+        .chat-input-area button {
+            align-self: flex-end;
+        }
+
+        /* Buttons */
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        button.secondary {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        button.success {
+            background: var(--success);
+        }
+
+        .actions {
+            position: sticky;
+            bottom: 0;
+            background: var(--surface);
+            padding: 16px 40px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
+        }
+
+        .progress-indicator {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            body { flex-direction: column; }
+            .form-container, .chat-container { width: 100%; }
+            .chat-container { height: 50vh; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- FORM SECTION (LEFT 60%) -->
+    <div class="form-container">
+        <header>
+            <h1>Context - Strategy Builder</h1>
+            <p class="subtitle">Define Vision, MVP, Market Position, and Product Roadmap for VCs and Stakeholders</p>
+        </header>
+
+        <form id="strategyForm">
+
+            <!-- SECTION 1: VISION & MISSION -->
+            <section>
+                <h2>1. Vision & Mission</h2>
+
+                <div class="form-group">
+                    <label>The Problem We Solve</label>
+                    <span class="help-text">What pain point does Context address?</span>
+                    <textarea name="vision_problem" placeholder="e.g., Professionals drown in tasks without clear priorities, leading to burnout and missed deadlines"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('vision_problem', 'Task overload without intelligent prioritization')">Task overload</span>
+                        <span class="chip" onclick="fillField('vision_problem', 'Burnout from poor work-life boundaries')">Burnout</span>
+                        <span class="chip" onclick="fillField('vision_problem', 'Time wasted on low-value urgent tasks')">Urgency trap</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Our Solution (One Sentence)</label>
+                    <span class="help-text">How does Context solve this differently?</span>
+                    <textarea name="vision_solution" placeholder="e.g., Context uses AI to auto-prioritize tasks by urgency/importance and schedules them around wellbeing"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('vision_solution', 'AI-powered prioritization that protects mental health')">AI + Wellbeing</span>
+                        <span class="chip" onclick="fillField('vision_solution', 'Smart layer on top of TickTick that does the thinking for you')">Smart TickTick layer</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>3-Year Vision</label>
+                    <span class="help-text">Where do we want Context to be in 3 years?</span>
+                    <textarea name="vision_longterm" placeholder="e.g., The personal productivity OS that replaces calendars, EAs, and project managers for knowledge workers"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 2: MVP DEFINITION -->
+            <section>
+                <h2>2. MVP - Minimum Viable Product</h2>
+
+                <div class="form-group">
+                    <label>Core Features (What must ship in V1?)</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="ticktick_sync" id="f1" checked>
+                            <label for="f1">TickTick bi-directional sync</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="eisenhower_matrix" id="f2" checked>
+                            <label for="f2">Eisenhower Matrix visualization</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="ai_analysis" id="f3" checked>
+                            <label for="f3">AI-powered urgency/importance analysis</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="drag_drop" id="f4">
+                            <label for="f4">Drag-and-drop task management</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="workload_warnings" id="f5">
+                            <label for="f5">Workload warnings (burnout prevention)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="agent_chat" id="f6">
+                            <label for="f6">Conversational agent (natural language task mgmt)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="email_integration" id="f7">
+                            <label for="f7">Email integration (Gmail, Outlook)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="calendar_sync" id="f8">
+                            <label for="f8">Calendar sync (Google, Office 365)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="mvp_features" value="mobile_view" id="f9">
+                            <label for="f9">Mobile-friendly responsive UI</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>The "Aha!" Moment</label>
+                    <span class="help-text">What interaction makes users realize they need this?</span>
+                    <textarea name="mvp_aha" placeholder="e.g., When I add 10 tasks and they instantly organize into quadrants with AI explanations"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>What We're NOT Building (V1 Scope Control)</label>
+                    <span class="help-text">Critical for focus. What features are explicitly deferred?</span>
+                    <textarea name="mvp_not_building" placeholder="e.g., No mobile app, no team collaboration, no time tracking"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('mvp_not_building', 'Mobile app, team features, time tracking, integrations beyond TickTick')">Standard deferrals</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: MARKET & COMPETITION -->
+            <section>
+                <h2>3. Market Analysis</h2>
+
+                <div class="form-group">
+                    <label>Target Customer (Ideal Customer Profile)</label>
+                    <span class="help-text">Who gets the most value? Be specific.</span>
+                    <textarea name="market_icp" placeholder="e.g., Tech-savvy professionals managing 50+ tasks/week, already using TickTick, value privacy"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('market_icp', 'Product managers, startup founders, consultants with 50+ tasks/week')">PM/Founders</span>
+                        <span class="chip" onclick="fillField('market_icp', 'Knowledge workers at tech companies using TickTick/Todoist')">Knowledge workers</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Market Size (TAM/SAM/SOM)</label>
+                    <span class="help-text">Total Addressable Market / Serviceable Available Market / Serviceable Obtainable Market</span>
+                    <textarea name="market_size" placeholder="e.g., TAM: 100M knowledge workers ($10B), SAM: 10M TickTick users ($1B), SOM: 100K early adopters ($10M)"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Key Competitors</label>
+                    <span class="help-text">Who else is solving this? What do they do well/poorly?</span>
+                    <textarea name="market_competitors" placeholder="Motion (auto-scheduling), Reclaim.ai (calendar blocking), TickTick AI, Sunsama (daily planning)"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Competitive Advantages (Our Moats)</label>
+                    <span class="help-text">Why would users choose Context over alternatives?</span>
+                    <textarea name="market_moats" placeholder="e.g., Privacy-first (local LLM option), psychological focus (burnout prevention vs pure efficiency), TickTick integration depth"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('market_moats', 'Privacy (local LLM), wellbeing focus, open-source flexibility')">Privacy + Wellbeing</span>
+                        <span class="chip" onclick="fillField('market_moats', 'Deep TickTick integration, multi-LLM support, customizable')">Integration depth</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Competitive Feature Grid</label>
+                    <span class="help-text">Quick comparison: Context vs competitors on key features (comma-separated)</span>
+                    <input type="text" name="market_feature_grid" placeholder="AI Priority, Local LLM, TickTick Sync, Burnout Warnings, Email Integration">
+                </div>
+            </section>
+
+            <!-- SECTION 4: PRODUCT STATUS -->
+            <section>
+                <h2>4. Current Product Status</h2>
+
+                <div class="form-group">
+                    <label>Development Stage</label>
+                    <select name="status_stage">
+                        <option value="concept">Concept / Wireframes</option>
+                        <option value="prototype">Prototype (Demo-able)</option>
+                        <option value="alpha" selected>Alpha (Works for founders, buggy)</option>
+                        <option value="beta">Private Beta (Early users)</option>
+                        <option value="public_beta">Public Beta</option>
+                        <option value="production">Production Ready</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Current Users / Traction</label>
+                    <span class="help-text">How many active users? Any metrics (DAU, retention, etc.)?</span>
+                    <input type="text" name="status_users" placeholder="e.g., 1 user (founder), 0 external beta testers">
+                </div>
+
+                <div class="form-group">
+                    <label>Technical Debt / Risks</label>
+                    <span class="help-text">What technical challenges need resolution before scale?</span>
+                    <textarea name="status_tech_debt" placeholder="e.g., Local LLM latency (3-5s), TickTick API rate limits, OAuth token refresh bugs"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Biggest Blockers to Launch</label>
+                    <span class="help-text">What's preventing you from opening to beta users today?</span>
+                    <textarea name="status_blockers" placeholder="e.g., UI polish, onboarding flow, error handling, mobile responsiveness"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 5: BUSINESS MODEL -->
+            <section>
+                <h2>5. Business Model & Pricing</h2>
+
+                <div class="form-group">
+                    <label>Monetization Strategy</label>
+                    <select name="business_model">
+                        <option value="free">Free Forever (Open Source)</option>
+                        <option value="freemium">Freemium (Free tier + paid upgrades)</option>
+                        <option value="subscription">Subscription Only</option>
+                        <option value="usage_based">Usage-Based (LLM API costs)</option>
+                        <option value="undecided" selected>Undecided (Exploring options)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Pricing (Hypothetical Fair Value)</label>
+                    <span class="help-text">Even if free now, what would be fair market price?</span>
+                    <input type="text" name="business_price" placeholder="e.g., $15/mo (below Motion's $34), or $0 (open-source with enterprise support)">
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('business_price', '$10/mo (indie tier), $25/mo (pro tier)')">Tiered pricing</span>
+                        <span class="chip" onclick="fillField('business_price', 'Free + enterprise support ($500/mo for teams)')">OSS + Enterprise</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Value Proposition (Why Users Pay)</label>
+                    <span class="help-text">What outcome justifies the price?</span>
+                    <textarea name="business_value_prop" placeholder="e.g., Save 5 hours/week on planning, reduce burnout by 30%, complete 20% more important tasks"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Primary Success Metric</label>
+                    <span class="help-text">How do users measure Context's value?</span>
+                    <select name="business_success_metric">
+                        <option value="time_saved">Hours saved per week</option>
+                        <option value="tasks_completed">High-priority tasks completed</option>
+                        <option value="stress_reduction">Self-reported stress/burnout reduction</option>
+                        <option value="adoption_rate">Daily active usage rate</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- SECTION 6: ROADMAP -->
+            <section>
+                <h2>6. Product Roadmap</h2>
+
+                <div class="form-group">
+                    <label>MVP Launch Target</label>
+                    <span class="help-text">When do you aim to open to beta users?</span>
+                    <input type="text" name="roadmap_mvp_date" placeholder="e.g., Q1 2025, or 'When feature X is stable'">
+                </div>
+
+                <div class="form-group">
+                    <label>Post-MVP Priorities (Next 3 features after V1)</label>
+                    <span class="help-text">What comes after the MVP?</span>
+                    <textarea name="roadmap_post_mvp" placeholder="1. Mobile app\n2. Team collaboration\n3. Advanced calendar integration"></textarea>
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('roadmap_post_mvp', '1. Mobile app (iOS/Android)\n2. Email integration (Gmail/Outlook)\n3. Calendar auto-blocking')">Standard next steps</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Key Milestones</label>
+                    <span class="help-text">Major checkpoints (Beta launch, 100 users, revenue, etc.)</span>
+                    <textarea name="roadmap_milestones" placeholder="e.g., M1: Private beta (10 users), M2: Public beta (100 users), M3: Paid tier launch, M4: 1,000 DAU"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 7: TECHNICAL ARCHITECTURE (High-Level) -->
+            <section>
+                <h2>7. Technical Overview (For VCs)</h2>
+
+                <div class="form-group">
+                    <label>Tech Stack Summary</label>
+                    <span class="help-text">High-level: Frontend, Backend, AI, Infrastructure</span>
+                    <textarea name="tech_stack" placeholder="e.g., Next.js frontend, FastAPI backend, Ollama/Claude LLMs, PostgreSQL, deployed on Railway/Vercel"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Scalability Strategy</label>
+                    <span class="help-text">How does it handle 10K users? 100K users?</span>
+                    <textarea name="tech_scalability" placeholder="e.g., Stateless backend + Redis caching, queue-based LLM processing, PostgreSQL partitioning"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>AI/LLM Strategy</label>
+                    <span class="help-text">Why this approach to AI? Cost vs quality tradeoffs?</span>
+                    <textarea name="tech_ai_strategy" placeholder="e.g., Multi-LLM support (Ollama for privacy, Claude for quality), user chooses tradeoff"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Data Privacy / Security Approach</label>
+                    <span class="help-text">How is user data protected? Compliance (GDPR, SOC2)?</span>
+                    <textarea name="tech_privacy" placeholder="e.g., Local LLM option for zero data sharing, encrypted tokens at rest, SOC2 compliance roadmap"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 8: GO-TO-MARKET -->
+            <section>
+                <h2>8. Go-to-Market Strategy</h2>
+
+                <div class="form-group">
+                    <label>Initial Launch Channels</label>
+                    <span class="help-text">How will you get first 100 users?</span>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="gtm_channels" value="product_hunt" id="ch1">
+                            <label for="ch1">Product Hunt launch</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="gtm_channels" value="hacker_news" id="ch2">
+                            <label for="ch2">Hacker News / Reddit (r/productivity)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="gtm_channels" value="content" id="ch3">
+                            <label for="ch3">Content marketing (blog, YouTube)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="gtm_channels" value="community" id="ch4">
+                            <label for="ch4">Productivity communities (TickTick Discord, Notion forums)</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" name="gtm_channels" value="paid" id="ch5">
+                            <label for="ch5">Paid ads (Google, Facebook)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Key Messaging / Tagline</label>
+                    <span class="help-text">How do you describe Context in 5-10 words?</span>
+                    <input type="text" name="gtm_tagline" placeholder="e.g., 'AI task manager that protects your wellbeing'">
+                    <div class="suggestion-chips">
+                        <span class="chip" onclick="fillField('gtm_tagline', 'The task manager that prevents burnout')">Burnout angle</span>
+                        <span class="chip" onclick="fillField('gtm_tagline', 'TickTick + AI brain that prioritizes for you')">AI assistant angle</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Early Adopter Incentives</label>
+                    <span class="help-text">What gets people to try Context before it's perfect?</span>
+                    <textarea name="gtm_incentives" placeholder="e.g., Lifetime free access for first 100 users, early input on features, exclusive community"></textarea>
+                </div>
+            </section>
+
+        </form>
+
+        <!-- STICKY FOOTER WITH EXPORT -->
+        <div class="actions">
+            <div class="progress-indicator">
+                <strong>Progress:</strong> <span id="progressText">0% complete</span>
+            </div>
+            <button class="success" onclick="exportData()">Export Strategy Documents</button>
+        </div>
+    </div>
+
+    <!-- CHAT PANEL (RIGHT 40%) -->
+    <div class="chat-container">
+        <div class="chat-header">
+            <h3>AI Strategy Assistant</h3>
+            <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">Ask questions about your answers, get suggestions, refine your strategy</p>
+            <div class="api-config">
+                <input type="password" id="apiKey" placeholder="Loading API key..." style="flex: 2;" disabled>
+                <select id="modelSelect" style="flex: 1; padding: 6px;">
+                    <option value="nex-agi/deepseek-v3.1-nex-n1:free">DeepSeek V3.1 (Free)</option>
+                    <option value="z-ai/glm-4.5-air:free">GLM-4.5 Air (Free)</option>
+                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                    <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message system">Loading API configuration from backend...</div>
+        </div>
+
+        <div class="chat-input-area">
+            <textarea id="chatInput" placeholder="Ask about your strategy, get suggestions, or request analysis..."></textarea>
+            <button onclick="sendMessage()" id="sendBtn">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // --- FORM UTILITIES ---
+        function fillField(fieldName, value) {
+            const field = document.querySelector(`[name="${fieldName}"]`);
+            if (field) {
+                field.value = value;
+                updateProgress();
+            }
+        }
+
+        function updateProgress() {
+            const form = document.getElementById('strategyForm');
+            const formData = new FormData(form);
+            let filled = 0;
+            let total = 0;
+
+            for (let input of form.querySelectorAll('input, select, textarea')) {
+                if (input.type === 'checkbox') continue; // Skip checkboxes in count
+                total++;
+                if (input.value.trim()) filled++;
+            }
+
+            const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
+            document.getElementById('progressText').textContent = `${percent}% complete (${filled}/${total} fields)`;
+        }
+
+        // Update progress on any input change
+        document.getElementById('strategyForm').addEventListener('input', updateProgress);
+
+        // --- CHAT FUNCTIONALITY ---
+        let conversationHistory = [];
+        let apiKeyLoaded = false;
+
+        // Try multiple common backend ports
+        const BACKEND_PORTS = [5407, 5400, 8000, 8001, 8002, 8003, 8004, 8005, 8006, 8007];
+
+        // Load API key from backend on page load
+        async function loadAPIConfig() {
+            let lastError;
+
+            // Try each port until one works
+            for (const port of BACKEND_PORTS) {
+                try {
+                    const response = await fetch(`http://localhost:${port}/api/strategy-config`, {
+                        mode: 'cors',
+                        credentials: 'omit'
+                    });
+
+                    if (!response.ok) {
+                        lastError = new Error(`Backend returned ${response.status}`);
+                        continue;
+                    }
+
+                    const config = await response.json();
+
+                    const apiKeyInput = document.getElementById('apiKey');
+                    const modelSelect = document.getElementById('modelSelect');
+
+                    if (config.openrouter_api_key) {
+                        apiKeyInput.value = config.openrouter_api_key;
+                        apiKeyInput.placeholder = 'API key loaded from backend';
+                        apiKeyInput.disabled = false;
+                        apiKeyLoaded = true;
+
+                        // Set default model
+                        if (config.default_model) {
+                            modelSelect.value = config.default_model;
+                        }
+
+                        addMessage('system', `API key loaded from backend (port ${port}) - Ready to chat!`);
+                        return; // Success! Exit function
+                    } else {
+                        lastError = new Error('No API key found in backend');
+                        continue;
+                    }
+                } catch (error) {
+                    lastError = error;
+                    continue; // Try next port
+                }
+            }
+
+            // If we get here, all ports failed
+            console.error('Failed to load API config from any backend port:', lastError);
+            const apiKeyInput = document.getElementById('apiKey');
+            apiKeyInput.placeholder = 'Enter OpenRouter API key manually';
+            apiKeyInput.disabled = false;
+            addMessage('system', `Could not load API key from backend. Please enter manually or start backend with: ./init.sh start backend`);
+        }
+
+        // Load config on page load
+        window.addEventListener('DOMContentLoaded', loadAPIConfig);
+
+        // Load CLAUDE.md content (embedded)
+        const CLAUDE_MD_CONTENT = `# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**Context** is an LLM-powered task management system that sits on top of TickTick to auto-prioritize, schedule, and protect wellbeing. It acts as an intelligent middleware layer between TickTick and the user, with a configurable LLM backend (Ollama/Qwen3, OpenRouter, Claude API, OpenAI).
+
+## Architecture
+
+### System Components
+
+\`\`\`
+Frontend (Next.js) ↔ Backend (FastAPI) ↔ External APIs (TickTick, Claude, Gmail, Azure DevOps)
+                            ↓
+                Data Layer (PostgreSQL, Redis, ChromaDB)
+                            ↓
+                Background Workers (Celery)
+\`\`\`
+
+**Key Flow:**
+1. User creates task in TickTick
+2. TickTick webhook → FastAPI endpoint
+3. Celery worker analyzes task via Claude API
+4. Task stored in PostgreSQL with analysis (urgency/importance/quadrant)
+5. WebSocket pushes update to Next.js frontend
+6. User sees task appear in Eisenhower matrix
+
+### Tech Stack
+
+- **Backend:** FastAPI (Python 3.11+), SQLAlchemy 2.0 (async), Alembic for migrations
+- **LLM Integration:** LangChain/LangGraph with multi-provider support (Ollama/Qwen3, OpenRouter, Anthropic Claude, OpenAI)
+- **Agent System:** LangGraph-based conversational agent with tool calling (create/complete/delete/list tasks)
+- **Database:** PostgreSQL 15+ (relational + JSONB), Redis 7 (cache), Docker Compose for local dev
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui
+- **Real-time:** Server-Sent Events (SSE) for chat/agent streaming
+- **Deployment:** Railway (backend), Vercel (frontend)
+
+(Full CLAUDE.md content available to assistant)`;
+
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+            const messagesDiv = document.getElementById('chatMessages');
+            const sendBtn = document.getElementById('sendBtn');
+
+            const userMessage = input.value.trim();
+            if (!userMessage) return;
+
+            if (!apiKey) {
+                addMessage('system', 'API key not loaded. Make sure backend is running or enter key manually.');
+                return;
+            }
+
+            // Add user message to UI
+            addMessage('user', userMessage);
+            input.value = '';
+
+            // Disable send button
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Thinking...';
+
+            // Get current form state
+            const formData = getCurrentFormData();
+
+            // Build conversation with context
+            conversationHistory.push({
+                role: 'user',
+                content: userMessage
+            });
+
+            const systemPrompt = `You are a product strategy advisor helping an entrepreneur refine their strategy for "Context" - an AI-powered task management system.
+
+CONTEXT ABOUT THE PRODUCT (from CLAUDE.md):
+${CLAUDE_MD_CONTENT}
+
+CURRENT FORM ANSWERS:
+${JSON.stringify(formData, null, 2)}
+
+Your role:
+- Help refine their answers to be VC-ready (grounded, no hype)
+- Suggest specific improvements to vision, MVP scope, market positioning
+- Challenge assumptions constructively
+- Provide concrete examples when suggesting changes
+- Keep responses concise and actionable
+
+The user is filling out a strategy questionnaire. Reference their current answers when giving advice.`;
+
+            try {
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                        'HTTP-Referer': window.location.href,
+                        'X-Title': 'Context Strategy Builder'
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            ...conversationHistory
+                        ],
+                        max_tokens: 1000,
+                        temperature: 0.7
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const assistantMessage = data.choices[0].message.content;
+
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: assistantMessage
+                });
+
+                addMessage('assistant', assistantMessage);
+
+            } catch (error) {
+                addMessage('system', `Error: ${error.message}. Check your API key and network.`);
+                console.error('Chat error:', error);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+            }
+        }
+
+        function addMessage(type, content) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+
+            // Render markdown for assistant messages
+            if (type === 'assistant' && typeof marked !== 'undefined') {
+                msgDiv.innerHTML = marked.parse(content);
+            } else {
+                msgDiv.textContent = content;
+            }
+
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function getCurrentFormData() {
+            const form = document.getElementById('strategyForm');
+            const formData = new FormData(form);
+            const data = {};
+
+            for (let [key, value] of formData.entries()) {
+                if (data[key]) {
+                    if (!Array.isArray(data[key])) {
+                        data[key] = [data[key]];
+                    }
+                    data[key].push(value);
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            return data;
+        }
+
+        // Allow Enter to send (with Shift+Enter for newline)
+        document.getElementById('chatInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // --- EXPORT FUNCTIONALITY ---
+        function exportData() {
+            const formData = getCurrentFormData();
+
+            // Generate multiple markdown documents
+            const documents = {
+                'vision_and_mission.md': generateVisionDoc(formData),
+                'mvp_specification.md': generateMVPDoc(formData),
+                'market_analysis.md': generateMarketDoc(formData),
+                'product_roadmap.md': generateRoadmapDoc(formData),
+                'technical_overview.md': generateTechDoc(formData),
+                'business_model.md': generateBusinessDoc(formData),
+                'gtm_strategy.md': generateGTMDoc(formData),
+                'competitive_analysis.md': generateCompetitiveDoc(formData),
+                'raw_answers.json': JSON.stringify(formData, null, 2)
+            };
+
+            // Create a zip-like structure (for now, download individually)
+            // In production, you'd use JSZip library
+            for (let [filename, content] of Object.entries(documents)) {
+                downloadFile(filename, content);
+            }
+
+            alert('Strategy documents exported! Check your downloads folder.');
+        }
+
+        function downloadFile(filename, content) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // --- DOCUMENT GENERATORS ---
+        function generateVisionDoc(data) {
+            return `# Vision & Mission - Context
+
+## The Problem
+${data.vision_problem || 'Not specified'}
+
+## Our Solution
+${data.vision_solution || 'Not specified'}
+
+## 3-Year Vision
+${data.vision_longterm || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateMVPDoc(data) {
+            const features = Array.isArray(data.mvp_features) ? data.mvp_features : [data.mvp_features];
+            return `# MVP Specification - Context
+
+## Core Features (V1)
+${features.filter(Boolean).map(f => `- ${f.replace(/_/g, ' ')}`).join('\n')}
+
+## The "Aha!" Moment
+${data.mvp_aha || 'Not specified'}
+
+## Out of Scope (V1)
+${data.mvp_not_building || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateMarketDoc(data) {
+            return `# Market Analysis - Context
+
+## Ideal Customer Profile
+${data.market_icp || 'Not specified'}
+
+## Market Size
+${data.market_size || 'Not specified'}
+
+## Key Competitors
+${data.market_competitors || 'Not specified'}
+
+## Competitive Advantages
+${data.market_moats || 'Not specified'}
+
+## Feature Comparison Grid
+${data.market_feature_grid || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateRoadmapDoc(data) {
+            return `# Product Roadmap - Context
+
+## Current Stage
+${data.status_stage || 'Not specified'}
+
+## Current Traction
+${data.status_users || 'Not specified'}
+
+## MVP Launch Target
+${data.roadmap_mvp_date || 'Not specified'}
+
+## Post-MVP Priorities
+${data.roadmap_post_mvp || 'Not specified'}
+
+## Key Milestones
+${data.roadmap_milestones || 'Not specified'}
+
+## Technical Debt / Risks
+${data.status_tech_debt || 'Not specified'}
+
+## Current Blockers
+${data.status_blockers || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateTechDoc(data) {
+            return `# Technical Overview - Context
+
+## Tech Stack
+${data.tech_stack || 'Not specified'}
+
+## Scalability Strategy
+${data.tech_scalability || 'Not specified'}
+
+## AI/LLM Approach
+${data.tech_ai_strategy || 'Not specified'}
+
+## Data Privacy & Security
+${data.tech_privacy || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateBusinessDoc(data) {
+            return `# Business Model - Context
+
+## Monetization Strategy
+${data.business_model || 'Not specified'}
+
+## Pricing
+${data.business_price || 'Not specified'}
+
+## Value Proposition
+${data.business_value_prop || 'Not specified'}
+
+## Success Metric
+${data.business_success_metric || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateGTMDoc(data) {
+            const channels = Array.isArray(data.gtm_channels) ? data.gtm_channels : [data.gtm_channels];
+            return `# Go-to-Market Strategy - Context
+
+## Launch Channels
+${channels.filter(Boolean).map(c => `- ${c.replace(/_/g, ' ')}`).join('\n')}
+
+## Key Messaging
+${data.gtm_tagline || 'Not specified'}
+
+## Early Adopter Incentives
+${data.gtm_incentives || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        function generateCompetitiveDoc(data) {
+            const features = (data.market_feature_grid || '').split(',').map(f => f.trim());
+            return `# Competitive Analysis - Context
+
+## Feature Comparison
+
+| Feature | Context | Motion | Reclaim | TickTick AI | Sunsama |
+|---------|---------|--------|---------|-------------|---------|
+${features.map(f => `| ${f} | ✓ | ? | ? | ? | ? |`).join('\n')}
+
+*(Fill in competitor columns based on research)*
+
+## Our Advantages
+${data.market_moats || 'Not specified'}
+
+## Competitor Strengths
+${data.market_competitors || 'Not specified'}
+
+---
+Generated: ${new Date().toISOString()}
+`;
+        }
+
+        // Initialize progress on load
+        updateProgress();
+    </script>
+</body>
+</html>

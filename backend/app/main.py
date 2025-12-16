@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.services import OllamaService
-from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations
+from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations, strategy_config
 
 # Load environment variables
 load_dotenv()
@@ -64,6 +64,8 @@ allowed_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    # Allow file:// protocol for local HTML files
+    "null",
 ]
 
 app.add_middleware(
@@ -83,6 +85,7 @@ app.include_router(projects.router)
 app.include_router(chat.router)
 app.include_router(agent.router)
 app.include_router(llm_configurations.router)
+app.include_router(strategy_config.router)
 
 
 # Request/Response models

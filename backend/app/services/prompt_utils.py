@@ -35,3 +35,4 @@ def build_profile_context(profile: Optional[Profile], max_chars: int = 700) -> O
     return context[:max_chars]
 
 
+

@@ -62,7 +62,11 @@ class APIClient {
         throw error;
       }
 
-      // Handle empty responses
+      // Handle empty responses (204 No Content, etc.)
+      if (response.status === 204 || response.headers.get('content-length') === '0') {
+        return {} as T;
+      }
+
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         return await response.json();

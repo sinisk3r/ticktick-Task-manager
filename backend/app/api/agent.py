@@ -77,16 +77,20 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
             messages.append(HumanMessage(content=payload.goal))
 
             # Configuration for conversation memory (thread-based)
+            # IMPORTANT: user_id and db must be injected in configurable for tools to work
             config = {
                 "configurable": {
                     "thread_id": f"user_{payload.user_id}",
-                }
+                    "user_id": payload.user_id,
+                    "db": db,
+                },
             }
 
             # Stream events from LangGraph and transform to our SSE format
             step_counter = 0
             current_tool = None
             accumulated_message = ""
+            is_tool_phase = False  # Track if we're in tool calling phase (reasoning)
 
             async for event in agent.astream_events(
                 {"messages": messages},
@@ -101,20 +105,22 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
                 # Reference: https://python.langchain.com/docs/how_to/streaming/#event-reference
 
                 if event_type == "on_chat_model_stream":
-                    # LLM is streaming tokens (thinking/response)
+                    # LLM is streaming tokens
                     chunk = data.get("chunk")
                     if chunk:
                         content = getattr(chunk, "content", "")
                         if content:
                             accumulated_message += content
-                            # Stream as thinking event (shows reasoning)
-                            yield _format_sse("thinking", {
+                            # Always emit as "message" - cloud APIs don't have separate thinking
+                            # Tool calls will be shown inline chronologically
+                            yield _format_sse("message", {
                                 "trace_id": trace_id,
                                 "delta": content,
                             })
 
                 elif event_type == "on_tool_start":
-                    # Tool is about to be called
+                    # Tool is about to be called - enter tool/reasoning phase
+                    is_tool_phase = True
                     step_counter += 1
                     tool_name = event_name
                     current_tool = tool_name
@@ -137,35 +143,39 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
                     })
 
                 elif event_type == "on_tool_end":
-                    # Tool execution completed
+                    # Tool execution completed - exit tool/reasoning phase
+                    is_tool_phase = False
                     tool_output = data.get("output")
 
                     if current_tool:
+                        # Serialize tool output properly
+                        # LangChain may return ToolMessage objects that need to be converted
+                        serializable_output = tool_output
+                        if hasattr(tool_output, "content"):
+                            # It's a LangChain message object
+                            serializable_output = tool_output.content
+
                         yield _format_sse("tool_result", {
                             "trace_id": trace_id,
                             "tool": current_tool,
-                            "result": tool_output,
+                            "result": serializable_output,
                         })
 
                         # If tool result has a summary, emit as message
-                        if isinstance(tool_output, dict) and tool_output.get("summary"):
+                        if isinstance(serializable_output, dict) and serializable_output.get("summary"):
                             yield _format_sse("message", {
                                 "trace_id": trace_id,
-                                "message": tool_output["summary"],
-                                "payload": {k: v for k, v in tool_output.items() if k != "summary"},
+                                "message": serializable_output["summary"],
+                                "payload": {k: v for k, v in serializable_output.items() if k != "summary"},
                             })
 
                     current_tool = None
 
                 elif event_type == "on_chain_end":
                     # Agent finished processing
-                    # Emit final accumulated message if we have one
-                    if accumulated_message.strip():
-                        yield _format_sse("message", {
-                            "trace_id": trace_id,
-                            "message": accumulated_message.strip(),
-                        })
-                        accumulated_message = ""
+                    # Don't emit accumulated message - deltas already streamed everything
+                    # This prevents duplicate content in the frontend
+                    pass
 
             # Done
             yield _format_sse("done", {"trace_id": trace_id})
@@ -203,10 +213,17 @@ async def execute_tool(payload: ExecuteRequest, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=400, detail=f"Unknown tool: {payload.tool}")
 
     tool = tool_map[payload.tool]
-    args = {**payload.args, "user_id": payload.user_id, "db": db}
+
+    # Build config with injected parameters
+    config = {
+        "configurable": {
+            "user_id": payload.user_id,
+            "db": db,
+        }
+    }
 
     try:
-        result = await tool.ainvoke(args)
+        result = await tool.ainvoke(payload.args, config=config)
         return {
             "trace_id": trace_id,
             "tool": payload.tool,

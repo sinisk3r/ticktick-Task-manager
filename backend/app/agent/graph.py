@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -54,7 +55,16 @@ logger = logging.getLogger(__name__)
 # System Message - Agent Personality & Instructions
 # -----------------------------------------------------------------------------
 
-SYSTEM_MESSAGE = """You are Context, an agentic task copilot designed to help users manage their tasks efficiently.
+def get_system_message() -> str:
+    """Generate system message with current date/time context."""
+    now = datetime.now()
+    current_date = now.strftime("%A, %B %d, %Y")
+    current_time = now.strftime("%I:%M %p")
+
+    return f"""You are Context, an agentic task copilot designed to help users manage their tasks efficiently.
+
+**Current Date & Time:**
+Today is {current_date} at {current_time}.
 
 **Your capabilities:**
 - Create, update, complete, and delete tasks
@@ -82,7 +92,9 @@ SYSTEM_MESSAGE = """You are Context, an agentic task copilot designed to help us
 - Extract clear, concise titles (max 120 chars, no quotes)
 - Only add description if it provides meaningful context beyond the title
 - Infer priority from user's language (urgent → 5, important → 3, normal → 0)
-- Extract due dates from natural language ("tomorrow", "next Friday", etc.)
+- Extract due dates from natural language ("tomorrow", "next Friday", etc.) based on the current date above
+- When calculating dates, use {current_date} as today's date
+- Format dates as ISO 8601: YYYY-MM-DDTHH:MM:SS
 - Suggest tags based on task type (e.g., "meeting", "bug", "review")
 
 **Remember:**
@@ -206,10 +218,20 @@ async def create_agent(
 
     # Create ReAct agent with LangGraph
     try:
+        # Verify tools can be serialized before binding
+        logger.debug(f"Verifying tool schemas for {len(tools_list)} tools...")
+        for tool in tools_list:
+            try:
+                schema = tool.get_input_schema()
+                logger.debug(f"✓ Tool '{tool.name}' schema validated: {list(schema.model_fields.keys())}")
+            except Exception as schema_error:
+                logger.error(f"✗ Tool '{tool.name}' schema generation failed: {schema_error}", exc_info=True)
+                raise ValueError(f"Tool '{tool.name}' has invalid schema: {schema_error}") from schema_error
+
         agent = create_react_agent(
             model=llm,
             tools=tools_list,
-            state_modifier=SYSTEM_MESSAGE,
+            state_modifier=get_system_message(),
             checkpointer=checkpointer,
         )
 
@@ -226,7 +248,7 @@ async def create_agent(
         return agent
 
     except Exception as e:
-        logger.error(f"Failed to create LangGraph agent for user_id={user_id}: {e}")
+        logger.error(f"Failed to create LangGraph agent for user_id={user_id}: {e}", exc_info=True)
         raise RuntimeError(f"Agent creation failed: {e}") from e
 
 
@@ -272,9 +294,9 @@ async def invoke_agent(
 
     # Inject user_id and db for tools (if stored on agent)
     if hasattr(agent, "_user_id"):
-        invoke_config["user_id"] = agent._user_id
+        invoke_config["configurable"]["user_id"] = agent._user_id
     if hasattr(agent, "_db"):
-        invoke_config["db"] = agent._db
+        invoke_config["configurable"]["db"] = agent._db
 
     # Format input for agent
     agent_input = {"messages": [("user", user_message)]}
@@ -325,9 +347,9 @@ async def stream_agent(
 
     # Inject user_id and db for tools (if stored on agent)
     if hasattr(agent, "_user_id"):
-        stream_config["user_id"] = agent._user_id
+        stream_config["configurable"]["user_id"] = agent._user_id
     if hasattr(agent, "_db"):
-        stream_config["db"] = agent._db
+        stream_config["configurable"]["db"] = agent._db
 
     # Format input for agent
     agent_input = {"messages": [("user", user_message)]}
@@ -355,5 +377,5 @@ __all__ = [
     "create_agent",
     "invoke_agent",
     "stream_agent",
-    "SYSTEM_MESSAGE",
+    "get_system_message",
 ]

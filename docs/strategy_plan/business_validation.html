@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Context - Business Validation Questionnaire</title>
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Layout: Form (60%) + Chat (40%) */
+        .form-container {
+            width: 60%;
+            overflow-y: auto;
+            padding: 40px;
+        }
+
+        .chat-container {
+            width: 40%;
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            background: var(--surface);
+        }
+
+        /* Header */
+        header {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        h1 { font-size: 2rem; margin-bottom: 8px; color: #0f172a; }
+        .subtitle { color: #64748b; font-size: 0.95rem; }
+
+        /* Form sections */
+        section {
+            background: var(--surface);
+            padding: 24px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        h2 {
+            font-size: 1.3rem;
+            color: var(--primary);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--bg);
+        }
+
+        .form-group { margin-bottom: 20px; }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: #334155;
+            font-size: 0.9rem;
+        }
+
+        .help-text {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        textarea { min-height: 80px; resize: vertical; }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .radio-item:hover {
+            background: #f1f5f9;
+            border-color: var(--primary);
+        }
+
+        .radio-item input[type="radio"] {
+            margin-top: 4px;
+            cursor: pointer;
+        }
+
+        .radio-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: 500;
+            flex: 1;
+        }
+
+        .radio-item.selected {
+            background: #eff6ff;
+            border-color: var(--primary);
+        }
+
+        .custom-answer {
+            margin-top: 8px;
+            padding: 10px;
+            background: #fef3c7;
+            border-radius: 6px;
+            border: 1px dashed #f59e0b;
+        }
+
+        .custom-answer textarea {
+            margin-top: 6px;
+            min-height: 60px;
+        }
+
+        /* Chat Panel */
+        .chat-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            background: #f8fafc;
+        }
+
+        .chat-header h3 {
+            font-size: 1rem;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .api-config {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .api-config input {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 0.8rem;
+        }
+
+        .api-config button {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            padding: 10px 12px;
+            border-radius: 8px;
+            max-width: 90%;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            background: var(--primary);
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+
+        .message.assistant {
+            background: #f1f5f9;
+            color: var(--text);
+            align-self: flex-start;
+        }
+
+        /* Markdown formatting in assistant messages */
+        .message.assistant h1, .message.assistant h2, .message.assistant h3 {
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .message.assistant h3 {
+            font-size: 1rem;
+            color: var(--primary);
+        }
+
+        .message.assistant ul, .message.assistant ol {
+            margin-left: 20px;
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+
+        .message.assistant li {
+            margin-bottom: 4px;
+        }
+
+        .message.assistant strong {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .message.assistant code {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+
+        .message.assistant p {
+            margin-bottom: 8px;
+        }
+
+        .message.system {
+            background: #fef3c7;
+            color: #92400e;
+            align-self: center;
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        .chat-input-area {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input-area textarea {
+            flex: 1;
+            min-height: 60px;
+            max-height: 120px;
+            resize: vertical;
+            font-size: 0.85rem;
+        }
+
+        .chat-input-area button {
+            align-self: flex-end;
+        }
+
+        /* Buttons */
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        button.secondary {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        button.success {
+            background: var(--success);
+        }
+
+        .actions {
+            position: sticky;
+            bottom: 0;
+            background: var(--surface);
+            padding: 16px 40px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
+            gap: 12px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .progress-indicator {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            body { flex-direction: column; }
+            .form-container, .chat-container { width: 100%; }
+            .chat-container { height: 50vh; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- FORM SECTION (LEFT 60%) -->
+    <div class="form-container">
+        <header>
+            <h1>Business Validation Questionnaire</h1>
+            <p class="subtitle">Validate assumptions, prioritize features, and plan your go-to-market strategy</p>
+        </header>
+
+        <form id="validationForm">
+
+            <!-- SECTION 1: CUSTOMER DISCOVERY & VALIDATION -->
+            <section>
+                <h2>1. Customer Discovery & Validation</h2>
+
+                <div class="form-group">
+                    <label>Have you interviewed potential users about their task management pain points?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'interviews')">
+                            <input type="radio" name="interviews" value="yes_extensive" id="int1">
+                            <label for="int1"><strong>Yes, extensively</strong> - I've conducted 10+ in-depth interviews</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'interviews')">
+                            <input type="radio" name="interviews" value="yes_some" id="int2">
+                            <label for="int2"><strong>Yes, some</strong> - I've talked to 3-10 potential users</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'interviews')">
+                            <input type="radio" name="interviews" value="planning" id="int3" checked>
+                            <label for="int3"><strong>Planning to</strong> - I have a list of people to interview</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'interviews')">
+                            <input type="radio" name="interviews" value="no" id="int4">
+                            <label for="int4"><strong>No</strong> - I'm building based on my own needs</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">Custom answer or additional context:</label>
+                        <textarea name="interviews_custom" placeholder="e.g., I've interviewed 5 product managers and 3 startup founders..."></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's the #1 pain point you've validated through user conversations?</label>
+                    <span class="help-text">What specific problem do people complain about most?</span>
+                    <textarea name="validated_pain" placeholder="e.g., 'I spend 30 minutes every morning deciding what to work on' or 'I feel guilty when I don't finish my todo list'"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Have you observed users using their current task management system?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'observation')">
+                            <input type="radio" name="observation" value="yes_multiple" id="obs1">
+                            <label for="obs1"><strong>Yes, multiple sessions</strong> - I've watched 5+ people use their tools</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'observation')">
+                            <input type="radio" name="observation" value="yes_few" id="obs2">
+                            <label for="obs2"><strong>Yes, a few</strong> - I've done 1-4 observation sessions</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'observation')">
+                            <input type="radio" name="observation" value="no_but_planning" id="obs3" checked>
+                            <label for="obs3"><strong>No, but planning to</strong> - I know I should do this</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'observation')">
+                            <input type="radio" name="observation" value="no" id="obs4">
+                            <label for="obs4"><strong>No</strong> - I'm relying on interviews and surveys</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Who is your "extreme user" - the person who needs this most desperately?</label>
+                    <span class="help-text">Be as specific as possible (name, role, company size, current tools)</span>
+                    <textarea name="extreme_user" placeholder="e.g., Sarah, product manager at a 50-person SaaS startup, managing 80+ tasks in TickTick, works 60hr weeks, burnt out"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 2: COMPETITIVE POSITIONING DEEP-DIVE -->
+            <section>
+                <h2>2. Competitive Positioning Deep-Dive</h2>
+
+                <div class="form-group">
+                    <label>Have you personally used Motion, Reclaim, or Sunsama for at least a week?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'competitor_usage')">
+                            <input type="radio" name="competitor_usage" value="all" id="comp1">
+                            <label for="comp1"><strong>All of them</strong> - I've thoroughly tested each competitor</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'competitor_usage')">
+                            <input type="radio" name="competitor_usage" value="some" id="comp2">
+                            <label for="comp2"><strong>Some of them</strong> - I've tried 1-2 competitors</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'competitor_usage')">
+                            <input type="radio" name="competitor_usage" value="trials_planned" id="comp3" checked>
+                            <label for="comp3"><strong>Will trial them</strong> - I plan to test competitors this week</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'competitor_usage')">
+                            <input type="radio" name="competitor_usage" value="none" id="comp4">
+                            <label for="comp4"><strong>None</strong> - I've only read about them online</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">What did you learn from testing competitors?</label>
+                        <textarea name="competitor_learnings" placeholder="e.g., Motion is too expensive ($34/mo), Reclaim only works with Google Calendar, Sunsama has great onboarding..."></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's the ONE thing Context does that NO competitor can replicate easily?</label>
+                    <span class="help-text">Your defensible moat - not just "better AI" but something structural</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'moat')">
+                            <input type="radio" name="moat" value="privacy" id="moat1">
+                            <label for="moat1"><strong>Privacy-first</strong> - Local LLM option (competitors require cloud)</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'moat')">
+                            <input type="radio" name="moat" value="wellbeing" id="moat2">
+                            <label for="moat2"><strong>Wellbeing focus</strong> - Prevents burnout vs optimizes efficiency</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'moat')">
+                            <input type="radio" name="moat" value="ticktick_depth" id="moat3" checked>
+                            <label for="moat3"><strong>TickTick integration depth</strong> - Build on existing workflow vs replacement</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'moat')">
+                            <input type="radio" name="moat" value="open_source" id="moat4">
+                            <label for="moat4"><strong>Open source + customizable</strong> - Users can self-host and extend</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">Explain your moat in detail:</label>
+                        <textarea name="moat_custom" placeholder="Why can't Motion just add this feature next quarter?"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>If Motion dropped their price to $15/mo tomorrow, would Context still win users?</label>
+                    <span class="help-text">Honest assessment - can you compete on value, not just price?</span>
+                    <textarea name="price_war_resilience" placeholder="Be honest about your competitive position beyond pricing..."></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 3: PRICING & UNIT ECONOMICS -->
+            <section>
+                <h2>3. Pricing & Unit Economics</h2>
+
+                <div class="form-group">
+                    <label>Have you asked potential users: "What would you pay for this?"</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_research')">
+                            <input type="radio" name="pricing_research" value="yes_quantitative" id="price1">
+                            <label for="price1"><strong>Yes, with data</strong> - I've surveyed 20+ users with Van Westendorp pricing</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_research')">
+                            <input type="radio" name="pricing_research" value="yes_qualitative" id="price2">
+                            <label for="price2"><strong>Yes, informally</strong> - Asked 5-10 people in conversations</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_research')">
+                            <input type="radio" name="pricing_research" value="planning" id="price3" checked>
+                            <label for="price3"><strong>Planning to</strong> - Will ask during beta interviews</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_research')">
+                            <input type="radio" name="pricing_research" value="no" id="price4">
+                            <label for="price4"><strong>No</strong> - I'm benchmarking against competitors</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's your target pricing tier?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_tier')">
+                            <input type="radio" name="pricing_tier" value="free" id="tier1">
+                            <label for="tier1"><strong>Free forever</strong> - Open source, community-driven</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_tier')">
+                            <input type="radio" name="pricing_tier" value="freemium_low" id="tier2">
+                            <label for="tier2"><strong>Freemium ($5-10/mo)</strong> - Below Todoist/TickTick Premium</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_tier')">
+                            <input type="radio" name="pricing_tier" value="mid_market" id="tier3" checked>
+                            <label for="tier3"><strong>Mid-market ($15-25/mo)</strong> - Compete with Reclaim, Akiflow</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'pricing_tier')">
+                            <input type="radio" name="pricing_tier" value="premium" id="tier4">
+                            <label for="tier4"><strong>Premium ($30-50/mo)</strong> - Compete with Motion, executive tools</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">Pricing rationale:</label>
+                        <textarea name="pricing_rationale" placeholder="Why this price point? What value justifies it?"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What are your LLM API costs per user per month? (rough estimate)</label>
+                    <span class="help-text">Critical for unit economics - can you be profitable at your target price?</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'llm_costs')">
+                            <input type="radio" name="llm_costs" value="zero" id="cost1" checked>
+                            <label for="cost1"><strong>$0 (Local LLM)</strong> - Users run Ollama locally</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'llm_costs')">
+                            <input type="radio" name="llm_costs" value="low" id="cost2">
+                            <label for="cost2"><strong>$0.50-2/mo</strong> - Using OpenRouter free tier or cheap models</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'llm_costs')">
+                            <input type="radio" name="llm_costs" value="medium" id="cost3">
+                            <label for="cost3"><strong>$3-8/mo</strong> - GPT-4 or Claude for quality</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'llm_costs')">
+                            <input type="radio" name="llm_costs" value="high" id="cost4">
+                            <label for="cost4"><strong>$10+/mo</strong> - Heavy API usage, need to optimize</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Would users pay for Context if TickTick added AI prioritization tomorrow?</label>
+                    <span class="help-text">Existential risk assessment - what's your defensibility?</span>
+                    <textarea name="ticktick_risk" placeholder="How do you stay relevant if your integration partner becomes your competitor?"></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 4: MVP FEATURE PRIORITIZATION -->
+            <section>
+                <h2>4. MVP Feature Prioritization</h2>
+
+                <div class="form-group">
+                    <label>What is the ONE feature for V1 that delivers 80% of the value?</label>
+                    <span class="help-text">Force yourself to choose - if you could only ship ONE thing, what is it?</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'mvp_one_feature')">
+                            <input type="radio" name="mvp_one_feature" value="personality" id="mvp1">
+                            <label for="mvp1"><strong>Personality-based task adaptation</strong> - AI learns your work style</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'mvp_one_feature')">
+                            <input type="radio" name="mvp_one_feature" value="eisenhower" id="mvp2" checked>
+                            <label for="mvp2"><strong>Eisenhower Matrix auto-categorization</strong> - Visual prioritization</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'mvp_one_feature')">
+                            <input type="radio" name="mvp_one_feature" value="agent" id="mvp3">
+                            <label for="mvp3"><strong>Conversational agent</strong> - Natural language task management</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'mvp_one_feature')">
+                            <input type="radio" name="mvp_one_feature" value="sync" id="mvp4">
+                            <label for="mvp4"><strong>TickTick sync</strong> - Seamless integration with existing workflow</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">Why this feature specifically?</label>
+                        <textarea name="mvp_feature_rationale" placeholder="What user insight or validation led you to prioritize this?"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What cognitive adaptation framework will you use for personality-based features?</label>
+                    <span class="help-text">If personality adaptation is core to your vision, how will you model it?</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'personality_framework')">
+                            <input type="radio" name="personality_framework" value="mbti" id="pers1">
+                            <label for="pers1"><strong>Myers-Briggs (MBTI)</strong> - 16 types, popular but less scientific</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'personality_framework')">
+                            <input type="radio" name="personality_framework" value="big_five" id="pers2">
+                            <label for="pers2"><strong>Big Five (OCEAN)</strong> - More scientific, dimensional approach</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'personality_framework')">
+                            <input type="radio" name="personality_framework" value="simpler" id="pers3" checked>
+                            <label for="pers3"><strong>Simpler dimensions</strong> - Morning/night person, deep work preferences, etc.</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'personality_framework')">
+                            <input type="radio" name="personality_framework" value="behavioral" id="pers4">
+                            <label for="pers4"><strong>Behavioral learning only</strong> - Infer from usage patterns, no explicit model</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'personality_framework')">
+                            <input type="radio" name="personality_framework" value="not_yet" id="pers5">
+                            <label for="pers5"><strong>Not in V1</strong> - Deferring personality features to post-MVP</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Can you ship a useful MVP without email integration?</label>
+                    <span class="help-text">Many users want "email → task" flow. Is this essential or nice-to-have?</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'email_necessity')">
+                            <input type="radio" name="email_necessity" value="essential" id="email1">
+                            <label for="email1"><strong>Essential for V1</strong> - Email is where tasks originate for knowledge workers</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'email_necessity')">
+                            <input type="radio" name="email_necessity" value="important_not_mvp" id="email2" checked>
+                            <label for="email2"><strong>Important but not MVP</strong> - Can launch without it, add in V1.1</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'email_necessity')">
+                            <input type="radio" name="email_necessity" value="nice_to_have" id="email3">
+                            <label for="email3"><strong>Nice-to-have</strong> - Most users already use TickTick's email integration</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's the maximum number of features you can REALISTICALLY ship in 4 weeks?</label>
+                    <span class="help-text">Be honest - how much can you actually build solo?</span>
+                    <input type="number" name="realistic_features" min="1" max="10" value="3" style="width: 100px;">
+                    <span class="help-text" style="margin-top: 8px;">Features (not counting polish, testing, docs)</span>
+                </div>
+            </section>
+
+            <!-- SECTION 5: LAUNCH STRATEGY & METRICS -->
+            <section>
+                <h2>5. Launch Strategy & Metrics</h2>
+
+                <div class="form-group">
+                    <label>When can you realistically ship to 10 beta users?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_timeline')">
+                            <input type="radio" name="beta_timeline" value="two_weeks" id="beta1">
+                            <label for="beta1"><strong>2 weeks</strong> - MVP is nearly done, just needs polish</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_timeline')">
+                            <input type="radio" name="beta_timeline" value="one_month" id="beta2" checked>
+                            <label for="beta2"><strong>1 month</strong> - Core features work, need onboarding + stability</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_timeline')">
+                            <input type="radio" name="beta_timeline" value="three_months" id="beta3">
+                            <label for="beta3"><strong>3 months</strong> - Still building core features</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_timeline')">
+                            <input type="radio" name="beta_timeline" value="six_months" id="beta4">
+                            <label for="beta4"><strong>6+ months</strong> - Significant work remaining</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">What's blocking an earlier launch?</label>
+                        <textarea name="beta_blockers" placeholder="e.g., TickTick OAuth bugs, UI polish, no onboarding flow..."></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Do you have 10 people who will commit to using Context for 2 weeks?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_users_committed')">
+                            <input type="radio" name="beta_users_committed" value="yes_list" id="commit1">
+                            <label for="commit1"><strong>Yes, I have a list</strong> - 10+ people waiting for beta access</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_users_committed')">
+                            <input type="radio" name="beta_users_committed" value="yes_network" id="commit2">
+                            <label for="commit2"><strong>Yes, from my network</strong> - I can recruit 10 colleagues/friends</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_users_committed')">
+                            <input type="radio" name="beta_users_committed" value="maybe" id="commit3" checked>
+                            <label for="commit3"><strong>Maybe</strong> - I know people who might try it</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'beta_users_committed')">
+                            <input type="radio" name="beta_users_committed" value="no" id="commit4">
+                            <label for="commit4"><strong>No</strong> - I'll need to recruit via Product Hunt / Reddit</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's your primary success metric for the first 30 days?</label>
+                    <span class="help-text">Choose ONE metric to optimize for initially</span>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'success_metric')">
+                            <input type="radio" name="success_metric" value="dau" id="metric1">
+                            <label for="metric1"><strong>Daily Active Users (DAU)</strong> - % of users who open Context daily</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'success_metric')">
+                            <input type="radio" name="success_metric" value="tasks_analyzed" id="metric2" checked>
+                            <label for="metric2"><strong>Tasks analyzed</strong> - # of tasks processed by AI per user</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'success_metric')">
+                            <input type="radio" name="success_metric" value="retention" id="metric3">
+                            <label for="metric3"><strong>Week 2 retention</strong> - % still using after 14 days</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'success_metric')">
+                            <input type="radio" name="success_metric" value="nps" id="metric4">
+                            <label for="metric4"><strong>NPS (Net Promoter Score)</strong> - Would recommend to a friend</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What's your target for this metric after 30 days?</label>
+                    <span class="help-text">Set a specific, measurable goal</span>
+                    <input type="text" name="metric_target" placeholder="e.g., 40% week-2 retention, or 8/10 NPS, or 50 tasks/user/week">
+                </div>
+
+                <div class="form-group">
+                    <label>How will you get your first 100 users?</label>
+                    <span class="help-text">Be specific about channels and outreach</span>
+                    <textarea name="user_acquisition_plan" placeholder="e.g., Post in r/productivity + r/TickTick, DM 50 TickTick Discord users, launch on Product Hunt..."></textarea>
+                </div>
+            </section>
+
+            <!-- SECTION 6: FOUNDER READINESS & RESOURCES -->
+            <section>
+                <h2>6. Founder Readiness & Resources</h2>
+
+                <div class="form-group">
+                    <label>What's your biggest scaling concern as a solo founder?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'scaling_concern')">
+                            <input type="radio" name="scaling_concern" value="technical" id="scale1">
+                            <label for="scale1"><strong>Technical</strong> - Infra costs, latency, handling load</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'scaling_concern')">
+                            <input type="radio" name="scaling_concern" value="marketing" id="scale2" checked>
+                            <label for="scale2"><strong>Marketing/Growth</strong> - Getting users, building audience</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'scaling_concern')">
+                            <input type="radio" name="scaling_concern" value="funding" id="scale3">
+                            <label for="scale3"><strong>Funding</strong> - Runway, LLM costs, sustainability</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'scaling_concern')">
+                            <input type="radio" name="scaling_concern" value="time" id="scale4">
+                            <label for="scale4"><strong>Time/Energy</strong> - Balancing day job, burnout, motivation</label>
+                        </div>
+                    </div>
+                    <div class="custom-answer">
+                        <label style="font-size: 0.85rem; color: #92400e;">How are you addressing this concern?</label>
+                        <textarea name="scaling_mitigation" placeholder="What's your plan to mitigate this risk?"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>How many hours per week can you realistically dedicate to Context?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'time_commitment')">
+                            <input type="radio" name="time_commitment" value="fulltime" id="time1">
+                            <label for="time1"><strong>40+ hours (Full-time)</strong> - Context is my main focus</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'time_commitment')">
+                            <input type="radio" name="time_commitment" value="parttime" id="time2" checked>
+                            <label for="time2"><strong>20-40 hours</strong> - Significant part-time commitment</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'time_commitment')">
+                            <input type="radio" name="time_commitment" value="nights_weekends" id="time3">
+                            <label for="time3"><strong>10-20 hours</strong> - Nights and weekends around day job</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'time_commitment')">
+                            <input type="radio" name="time_commitment" value="minimal" id="time4">
+                            <label for="time4"><strong><10 hours</strong> - Side project when I have time</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Do you have a co-founder or are you looking for one?</label>
+                    <div class="radio-group">
+                        <div class="radio-item" onclick="selectRadio(this, 'cofounder_status')">
+                            <input type="radio" name="cofounder_status" value="have_cofounder" id="co1">
+                            <label for="co1"><strong>Have co-founder(s)</strong> - Team is set</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'cofounder_status')">
+                            <input type="radio" name="cofounder_status" value="actively_looking" id="co2">
+                            <label for="co2"><strong>Actively looking</strong> - Recruiting a co-founder now</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'cofounder_status')">
+                            <input type="radio" name="cofounder_status" value="open_to_it" id="co3">
+                            <label for="co3"><strong>Open to it</strong> - Would consider right person</label>
+                        </div>
+                        <div class="radio-item" onclick="selectRadio(this, 'cofounder_status')">
+                            <input type="radio" name="cofounder_status" value="solo_intentional" id="co4" checked>
+                            <label for="co4"><strong>Intentionally solo</strong> - Prefer to build alone for now</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>What would make you shut down this project?</label>
+                    <span class="help-text">Define your "quit criteria" upfront to avoid sunk cost fallacy</span>
+                    <textarea name="quit_criteria" placeholder="e.g., If no product-market fit after 6 months, if LLM costs exceed $10k/mo, if day job demands increase..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>What's your 6-month vision of success?</label>
+                    <span class="help-text">What outcomes would make you feel this was worth it?</span>
+                    <textarea name="six_month_success" placeholder="e.g., 500 DAU, $2k MRR, acquired by Motion, or just learned a ton about LLMs..."></textarea>
+                </div>
+            </section>
+
+        </form>
+
+        <!-- STICKY FOOTER WITH EXPORT -->
+        <div class="actions">
+            <div class="progress-indicator">
+                <strong>Progress:</strong> <span id="progressText">0% complete</span>
+            </div>
+            <div class="action-buttons">
+                <button class="secondary" onclick="copyToClipboard()">Copy to Clipboard</button>
+                <button class="secondary" onclick="downloadJSON()">Download JSON</button>
+                <button class="success" onclick="downloadMarkdown()">Download Markdown Summary</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAT PANEL (RIGHT 40%) -->
+    <div class="chat-container">
+        <div class="chat-header">
+            <h3>Startup Advisor AI</h3>
+            <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">Challenge assumptions, validate hypotheses, get tactical advice</p>
+            <div class="api-config">
+                <input type="password" id="apiKey" placeholder="Loading API key..." style="flex: 2;" disabled>
+                <select id="modelSelect" style="flex: 1; padding: 6px;">
+                    <option value="nex-agi/deepseek-v3.1-nex-n1:free">DeepSeek V3.1 (Free)</option>
+                    <option value="z-ai/glm-4.5-air:free">GLM-4.5 Air (Free)</option>
+                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                    <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message system">Loading API configuration from backend...</div>
+        </div>
+
+        <div class="chat-input-area">
+            <textarea id="chatInput" placeholder="Ask: 'Should I charge for V1?' or 'Is my moat defensible?' or 'Suggest customer interview questions'"></textarea>
+            <button onclick="sendMessage()" id="sendBtn">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // --- RADIO BUTTON SELECTION ---
+        function selectRadio(item, groupName) {
+            // Remove selected class from all items in this group
+            const allItems = document.querySelectorAll(`input[name="${groupName}"]`);
+            allItems.forEach(input => {
+                input.closest('.radio-item').classList.remove('selected');
+            });
+
+            // Add selected class to clicked item
+            item.classList.add('selected');
+
+            // Check the radio button
+            const radio = item.querySelector('input[type="radio"]');
+            if (radio) radio.checked = true;
+
+            updateProgress();
+        }
+
+        // Initialize selected state on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+                radio.closest('.radio-item').classList.add('selected');
+            });
+            updateProgress();
+        });
+
+        // --- PROGRESS TRACKING ---
+        function updateProgress() {
+            const form = document.getElementById('validationForm');
+            let filled = 0;
+            let total = 0;
+
+            // Count radio groups (one per name)
+            const radioGroups = new Set();
+            form.querySelectorAll('input[type="radio"]').forEach(radio => {
+                radioGroups.add(radio.name);
+            });
+
+            radioGroups.forEach(name => {
+                total++;
+                if (form.querySelector(`input[name="${name}"]:checked`)) {
+                    filled++;
+                }
+            });
+
+            // Count textareas and text inputs
+            form.querySelectorAll('textarea, input[type="text"], input[type="number"]').forEach(input => {
+                // Skip custom answer fields in progress count
+                if (!input.name.includes('_custom') && !input.name.includes('_rationale') && !input.name.includes('_learnings')) {
+                    total++;
+                    if (input.value.trim()) filled++;
+                }
+            });
+
+            const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
+            document.getElementById('progressText').textContent = `${percent}% complete (${filled}/${total} questions)`;
+        }
+
+        // Update progress on any input change
+        document.getElementById('validationForm').addEventListener('input', updateProgress);
+
+        // --- CHAT FUNCTIONALITY ---
+        let conversationHistory = [];
+        let apiKeyLoaded = false;
+
+        // Try multiple common backend ports
+        const BACKEND_PORTS = [5407, 5400, 8000, 8001, 8002, 8003, 8004, 8005, 8006, 8007];
+
+        // Load API key from backend on page load
+        async function loadAPIConfig() {
+            let lastError;
+
+            for (const port of BACKEND_PORTS) {
+                try {
+                    const response = await fetch(`http://localhost:${port}/api/strategy-config`, {
+                        mode: 'cors',
+                        credentials: 'omit'
+                    });
+
+                    if (!response.ok) {
+                        lastError = new Error(`Backend returned ${response.status}`);
+                        continue;
+                    }
+
+                    const config = await response.json();
+
+                    const apiKeyInput = document.getElementById('apiKey');
+                    const modelSelect = document.getElementById('modelSelect');
+
+                    if (config.openrouter_api_key) {
+                        apiKeyInput.value = config.openrouter_api_key;
+                        apiKeyInput.placeholder = 'API key loaded from backend';
+                        apiKeyInput.disabled = false;
+                        apiKeyLoaded = true;
+
+                        if (config.default_model) {
+                            modelSelect.value = config.default_model;
+                        }
+
+                        addMessage('system', `API key loaded from backend (port ${port}) - Ready to chat!`);
+                        return;
+                    } else {
+                        lastError = new Error('No API key found in backend');
+                        continue;
+                    }
+                } catch (error) {
+                    lastError = error;
+                    continue;
+                }
+            }
+
+            console.error('Failed to load API config from any backend port:', lastError);
+            const apiKeyInput = document.getElementById('apiKey');
+            apiKeyInput.placeholder = 'Enter OpenRouter API key manually';
+            apiKeyInput.disabled = false;
+            addMessage('system', `Could not load API key from backend. Please enter manually or start backend with: ./init.sh start backend`);
+        }
+
+        window.addEventListener('DOMContentLoaded', loadAPIConfig);
+
+        // Embedded context about Context project
+        const PROJECT_CONTEXT = `# Context - Business Validation Context
+
+**Project:** Context is an LLM-powered task management system that sits on top of TickTick to auto-prioritize tasks using the Eisenhower Matrix (urgent/important quadrants).
+
+**Key Features (Current):**
+- TickTick bi-directional sync
+- AI-powered urgency/importance analysis
+- Eisenhower Matrix visualization
+- Conversational agent for task management
+- Multi-LLM support (Ollama/local, OpenRouter, Claude, OpenAI)
+
+**Tech Stack:**
+- Backend: FastAPI (Python), SQLAlchemy, PostgreSQL
+- Frontend: Next.js 14, TypeScript, Tailwind, shadcn/ui
+- LLM: LangGraph agent with multi-provider support
+- Deployment: Railway (backend), Vercel (frontend)
+
+**Current Status:** Alpha stage - works for founder, needs polish for beta users
+
+**Key Competitors:** Motion ($34/mo), Reclaim.ai, Sunsama, TickTick AI
+
+**Potential Moats:**
+- Privacy (local LLM option)
+- Wellbeing focus (burnout prevention vs pure efficiency)
+- Deep TickTick integration
+- Open source + customizable
+
+**Founder Status:** Solo founder, part-time, building MVP`;
+
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+            const messagesDiv = document.getElementById('chatMessages');
+            const sendBtn = document.getElementById('sendBtn');
+
+            const userMessage = input.value.trim();
+            if (!userMessage) return;
+
+            if (!apiKey) {
+                addMessage('system', 'API key not loaded. Make sure backend is running or enter key manually.');
+                return;
+            }
+
+            addMessage('user', userMessage);
+            input.value = '';
+
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Thinking...';
+
+            const formData = getCurrentFormData();
+
+            conversationHistory.push({
+                role: 'user',
+                content: userMessage
+            });
+
+            const systemPrompt = `You are a startup advisor helping validate business assumptions and prioritize next steps for an entrepreneur building "Context" - an AI-powered task management system.
+
+PROJECT CONTEXT:
+${PROJECT_CONTEXT}
+
+CURRENT QUESTIONNAIRE ANSWERS:
+${JSON.stringify(formData, null, 2)}
+
+Your role:
+- Challenge assumptions constructively
+- Suggest concrete validation experiments (customer interviews, pricing tests, competitor trials)
+- Help prioritize ruthlessly (force hard choices about MVP scope)
+- Provide tactical advice grounded in lean startup methodology
+- Reference their specific answers when giving feedback
+- Be direct about risks (competitive threats, unit economics, time constraints)
+
+Keep responses concise and actionable. Focus on de-risking the business model and achieving product-market fit.`;
+
+            try {
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                        'HTTP-Referer': window.location.href,
+                        'X-Title': 'Context Business Validation'
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            ...conversationHistory
+                        ],
+                        max_tokens: 1200,
+                        temperature: 0.7
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const assistantMessage = data.choices[0].message.content;
+
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: assistantMessage
+                });
+
+                addMessage('assistant', assistantMessage);
+
+            } catch (error) {
+                addMessage('system', `Error: ${error.message}. Check your API key and network.`);
+                console.error('Chat error:', error);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+            }
+        }
+
+        function addMessage(type, content) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+
+            if (type === 'assistant' && typeof marked !== 'undefined') {
+                msgDiv.innerHTML = marked.parse(content);
+            } else {
+                msgDiv.textContent = content;
+            }
+
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function getCurrentFormData() {
+            const form = document.getElementById('validationForm');
+            const formData = new FormData(form);
+            const data = {};
+
+            for (let [key, value] of formData.entries()) {
+                if (data[key]) {
+                    if (!Array.isArray(data[key])) {
+                        data[key] = [data[key]];
+                    }
+                    data[key].push(value);
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            return data;
+        }
+
+        document.getElementById('chatInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // --- EXPORT FUNCTIONS ---
+        function copyToClipboard() {
+            const markdown = generateMarkdownSummary();
+            navigator.clipboard.writeText(markdown).then(() => {
+                alert('Copied to clipboard! Paste into your notes or send to your AI assistant.');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy. Try the Download Markdown option instead.');
+            });
+        }
+
+        function downloadJSON() {
+            const data = getCurrentFormData();
+            const jsonString = JSON.stringify(data, null, 2);
+            downloadFile('business_validation_answers.json', jsonString, 'application/json');
+        }
+
+        function downloadMarkdown() {
+            const markdown = generateMarkdownSummary();
+            downloadFile('business_validation_summary.md', markdown, 'text/markdown');
+        }
+
+        function downloadFile(filename, content, mimeType = 'text/plain') {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function generateMarkdownSummary() {
+            const data = getCurrentFormData();
+            const timestamp = new Date().toISOString();
+
+            return `# Business Validation Summary - Context
+
+Generated: ${timestamp}
+
+## 1. Customer Discovery & Validation
+
+**User Interviews Conducted:**
+${data.interviews || 'Not specified'} ${data.interviews_custom ? `\n> ${data.interviews_custom}` : ''}
+
+**Validated Pain Point:**
+${data.validated_pain || 'Not specified'}
+
+**User Observation:**
+${data.observation || 'Not specified'}
+
+**Extreme User Profile:**
+${data.extreme_user || 'Not specified'}
+
+---
+
+## 2. Competitive Positioning
+
+**Competitor Usage:**
+${data.competitor_usage || 'Not specified'}
+
+**Learnings from Competitors:**
+${data.competitor_learnings || 'Not specified'}
+
+**Defensible Moat:**
+${data.moat || 'Not specified'} ${data.moat_custom ? `\n> ${data.moat_custom}` : ''}
+
+**Price War Resilience:**
+${data.price_war_resilience || 'Not specified'}
+
+---
+
+## 3. Pricing & Unit Economics
+
+**Pricing Research:**
+${data.pricing_research || 'Not specified'}
+
+**Target Pricing Tier:**
+${data.pricing_tier || 'Not specified'} ${data.pricing_rationale ? `\n> ${data.pricing_rationale}` : ''}
+
+**LLM API Costs:**
+${data.llm_costs || 'Not specified'} per user/month
+
+**TickTick Competition Risk:**
+${data.ticktick_risk || 'Not specified'}
+
+---
+
+## 4. MVP Feature Prioritization
+
+**ONE Core Feature for V1:**
+${data.mvp_one_feature || 'Not specified'} ${data.mvp_feature_rationale ? `\n> ${data.mvp_feature_rationale}` : ''}
+
+**Personality Framework:**
+${data.personality_framework || 'Not specified'}
+
+**Email Integration Necessity:**
+${data.email_necessity || 'Not specified'}
+
+**Realistic Feature Count (4 weeks):**
+${data.realistic_features || 'Not specified'} features
+
+---
+
+## 5. Launch Strategy & Metrics
+
+**Beta Launch Timeline:**
+${data.beta_timeline || 'Not specified'}
+
+**Beta Launch Blockers:**
+${data.beta_blockers || 'Not specified'}
+
+**Committed Beta Users:**
+${data.beta_users_committed || 'Not specified'}
+
+**Primary Success Metric:**
+${data.success_metric || 'Not specified'}
+
+**30-Day Target:**
+${data.metric_target || 'Not specified'}
+
+**First 100 Users Plan:**
+${data.user_acquisition_plan || 'Not specified'}
+
+---
+
+## 6. Founder Readiness & Resources
+
+**Biggest Scaling Concern:**
+${data.scaling_concern || 'Not specified'}
+
+**Mitigation Plan:**
+${data.scaling_mitigation || 'Not specified'}
+
+**Time Commitment:**
+${data.time_commitment || 'Not specified'}
+
+**Co-founder Status:**
+${data.cofounder_status || 'Not specified'}
+
+**Quit Criteria:**
+${data.quit_criteria || 'Not specified'}
+
+**6-Month Success Vision:**
+${data.six_month_success || 'Not specified'}
+
+---
+
+## Next Steps (Suggested)
+
+Based on your answers, consider:
+
+1. **Customer Validation:** ${data.interviews === 'no' || data.interviews === 'planning' ? 'Schedule 5-10 user interviews this week' : 'Continue interviewing users to validate features'}
+
+2. **Competitor Analysis:** ${data.competitor_usage === 'none' || data.competitor_usage === 'trials_planned' ? 'Trial Motion/Reclaim/Sunsama for 1 week each' : 'Document competitive differentiation clearly'}
+
+3. **MVP Scope:** ${data.realistic_features ? `Ship ${data.realistic_features} features in 4 weeks, defer everything else` : 'Define realistic MVP scope'}
+
+4. **Launch Prep:** ${data.beta_timeline === 'two_weeks' || data.beta_timeline === 'one_month' ? 'Finalize beta user list and outreach plan' : 'Accelerate development timeline if possible'}
+
+5. **Metrics Setup:** Implement tracking for ${data.success_metric || 'primary metric'} before launch
+
+---
+
+*This summary was generated from the Business Validation Questionnaire for Context.*
+`;
+        }
+
+        // Initialize
+        updateProgress();
+    </script>
+</body>
+</html>

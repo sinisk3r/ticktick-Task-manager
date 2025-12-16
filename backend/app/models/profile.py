@@ -32,3 +32,4 @@ class Profile(Base):
         return f"<Profile(user_id={self.user_id})>"
 
 
+

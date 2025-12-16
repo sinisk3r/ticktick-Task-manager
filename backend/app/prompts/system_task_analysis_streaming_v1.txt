@@ -14,3 +14,4 @@ Allowed object shapes:
 - Analysis:   {"type":"analysis","analysis":{"urgency_score":1-10,"importance_score":1-10,"eisenhower_quadrant":"Q1|Q2|Q3|Q4","effort_hours":0.5-40.0,"analysis_reasoning":"<brief>"}}
 - Done:       {"type":"done"}
 
+

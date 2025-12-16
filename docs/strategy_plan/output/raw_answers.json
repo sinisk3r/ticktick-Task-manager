@@ -1,0 +1,42 @@
+{
+  "vision_problem": "Productivity tools force everyone into the same workflow, but high-performers have fundamentally different cognitive styles. A Myers-Briggs \"TJ\" type needs crisp, structured tasks while an \"FP\" type gets overwhelmed by that rigidity—yet both need to execute 50+ tasks/week without burning out.",
+  "vision_solution": "AI that adapts to HOW you think, not just what you need to do. Context learns your personality-driven work style (structured vs. flexible, detail vs. big-picture) and translates tasks into YOUR language while protecting time for deep work and personal life.",
+  "vision_longterm": "The assistant that knows you well enough to say \"I notice you're avoiding this ambiguous task—should we break it into 3 concrete steps like you prefer?\" or \"This feels like too much structure—let's keep it high-level and trust your intuition.\"",
+  "mvp_features": [
+    "ticktick_sync",
+    "eisenhower_matrix",
+    "ai_analysis",
+    "drag_drop",
+    "agent_chat",
+    "mobile_view"
+  ],
+  "mvp_aha": "I want users to say: When Context automatically flagged that 'important but not urgent' project I'd been avoiding for 3 weeks—and suggested breaking it into the specific, structured steps I prefer—I actually started it. That's never happened with any other tool.",
+  "mvp_not_building": "Mobile app, team features, time tracking",
+  "market_icp": "Product managers, startup founders, and consultants (50+ tasks/week) who've tried Motion/Reclaim/Sunsama but found them too rigid or impersonal. They need AI that adapts to their cognitive style, not another one-size-fits-all system.",
+  "market_size": "AM: $2.3B productivity software market (Statista 2024). SAM: 2M knowledge workers using premium task managers (Motion: 10K users, Reclaim: 50K). SOM: 1K users by year-end (0.05% of SAM) = $60K ARR at $5-15/mo [Needs to be verified]",
+  "market_competitors": "Motion (auto-scheduling), Reclaim.ai (calendar blocking), Sunsama (daily planning) - but not sure what they're good at vs what they don't do well.\n| Feature                | Motion | Reclaim | Sunsama | Context* |\n|------------------|--------|---------|---------|---------|\n| Auto-scheduling  | ★★★★★  | ★★★☆☆   | ★★☆☆☆   | ★★★★☆  |\n| Calendar sync      | ★★★☆☆  | ★★★★★   | ★★★★★   | ★★★☆☆   |\n| Eisenhower view  | ★★☆☆☆  | ★☆☆☆☆   | ★★★☆☆   | ★★★★★   |\n| Personality adapt | ★☆☆☆☆  | ★☆☆☆☆   | ★★☆☆☆   | ★★★★★   |\n| Conversation        | ★★☆☆☆  | ★☆☆☆☆   | ★★★☆☆   | ★★★★★   |\n",
+  "market_moats": "The more you use Context, the better it understands your cognitive patterns (Myers-Briggs type, work style preferences, decision-making heuristics). Motion optimizes for calendar constraints; Context optimizes for YOUR brain. This creates switching costs—you'd lose your 'AI work twin' if you left",
+  "market_feature_grid": "[Needs validation]",
+  "status_stage": "alpha",
+  "status_users": "Only me",
+  "status_tech_debt": "Only one guy vibe coding the app, still has a lot of learning on deploying at scale and for multiple users",
+  "status_blockers": "Most features are still being built - trying to figure out GTM strategy so that I know what MVP to build ",
+  "business_model": "freemium",
+  "business_price": "$5/mo (indie tier - OpenRouter models), $15/mo (SOTA model access)",
+  "business_value_prop": "Save 1-2 hours/week on planning (for over-planners) - and encourage planning for those who don't. Reduce decision fatigue by 40%, complete 25% more 'important but not urgent' tasks that actually grow your career.",
+  "business_success_metric": "time_saved",
+  "roadmap_mvp_date": "Q1 2026",
+  "roadmap_post_mvp": "1. Mobile app (iOS/Android)\n2. Personality type detection and adaptation (Myers-Briggs from task patterns)\n3. Build context on users - what they do, people they work with, work style, and priorities.",
+  "roadmap_milestones": "M1: Private beta (10 users), M2: Public beta (100 users), M3: Paid tier launch, M4: 1,000 DAU",
+  "tech_stack": "Next.js 14 frontend, FastAPI backend, PostgreSQL + ChromaDB for task history + embeddings, LangGraph for AI orchestration (supports Ollama for privacy, OpenRouter for speed, and SOTA models for quality) ",
+  "tech_scalability": "[Needs to be planned]",
+  "tech_ai_strategy": "Local models are slow and all machines cannot run great but fast small models. Proposing OpenRouter for cheaper models and higher tiers for SOTA models (Claude, GPT, Gemini) ",
+  "tech_privacy": "User's tasks never leave their control. Compliance to be worked on.",
+  "gtm_channels": [
+    "product_hunt",
+    "hacker_news",
+    "community"
+  ],
+  "gtm_tagline": "The Personal assistant that works for you and with you, the way you do.",
+  "gtm_incentives": "Early input on features, something new to try, perhaps tons of credits (making it free forever, if viable)"
+}

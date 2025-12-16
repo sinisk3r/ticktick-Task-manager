@@ -14,8 +14,8 @@ import logging
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
-from langchain_core.tools import InjectedToolArg
-from langchain.tools import tool
+from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,8 +77,7 @@ def task_to_payload(task: Task) -> Dict[str, Any]:
 
 @tool(parse_docstring=True)
 async def fetch_tasks(
-    user_id: int,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
     status: Optional[str] = None,
     quadrant: Optional[str] = None,
     limit: int = 50,
@@ -91,59 +90,75 @@ async def fetch_tasks(
     Results are paginated with limit and offset.
 
     Args:
-        user_id: User ID for ownership checks (required)
         status: Optional task status filter (ACTIVE, COMPLETED, DELETED)
         quadrant: Optional eisenhower quadrant filter (Q1, Q2, Q3, Q4)
         limit: Maximum number of tasks to return (default: 50, max: 200)
         offset: Number of tasks to skip for pagination (default: 0)
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config", "tasks": [], "total": 0}
+
     # Validate limit
     if limit < 1 or limit > 200:
         limit = min(max(limit, 1), 200)
     if offset < 0:
         offset = 0
 
-    query = select(Task).where(Task.user_id == user_id)
+    try:
+        query = select(Task).where(Task.user_id == user_id)
 
-    # Parse status enum if provided
-    if status:
-        try:
-            status_enum = TaskStatus(status)
-            query = query.where(Task.status == status_enum)
-        except ValueError:
-            pass  # Ignore invalid status values
+        # Parse status enum if provided
+        if status:
+            try:
+                status_enum = TaskStatus(status)
+                query = query.where(Task.status == status_enum)
+            except ValueError:
+                logger.warning(f"Invalid status value '{status}' provided to fetch_tasks, ignoring")
 
-    # Parse quadrant enum if provided
-    if quadrant:
-        try:
-            quadrant_enum = EisenhowerQuadrant(quadrant)
-            query = query.where(
-                (Task.manual_quadrant_override == quadrant_enum)
-                | (
-                    Task.manual_quadrant_override.is_(None)
-                    & (Task.eisenhower_quadrant == quadrant_enum)
+        # Parse quadrant enum if provided
+        if quadrant:
+            try:
+                quadrant_enum = EisenhowerQuadrant(quadrant)
+                query = query.where(
+                    (Task.manual_quadrant_override == quadrant_enum)
+                    | (
+                        Task.manual_quadrant_override.is_(None)
+                        & (Task.eisenhower_quadrant == quadrant_enum)
+                    )
                 )
-            )
-        except ValueError:
-            pass  # Ignore invalid quadrant values
+            except ValueError:
+                logger.warning(f"Invalid quadrant value '{quadrant}' provided to fetch_tasks, ignoring")
 
-    query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+        query = query.order_by(Task.created_at.desc()).limit(limit).offset(offset)
 
-    result = await db.execute(query)
-    tasks = result.scalars().all()
+        result = await db.execute(query)
+        tasks = result.scalars().all()
 
-    return {
-        "tasks": [task_to_payload(t) for t in tasks],
-        "total": len(tasks),
-        "summary": f"Found {len(tasks)} tasks",
-    }
+        logger.info(f"fetch_tasks: user_id={user_id}, found {len(tasks)} tasks (status={status}, quadrant={quadrant})")
+
+        return {
+            "tasks": [task_to_payload(t) for t in tasks],
+            "total": len(tasks),
+            "summary": f"Found {len(tasks)} tasks",
+        }
+    except Exception as e:
+        logger.error(f"fetch_tasks failed for user_id={user_id}: {e}", exc_info=True)
+        return {
+            "tasks": [],
+            "total": 0,
+            "summary": f"Error fetching tasks: {str(e)}",
+            "error": str(e),
+        }
 
 
 @tool(parse_docstring=True)
 async def fetch_task(
-    user_id: int,
     task_id: int,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
 ) -> Dict[str, Any]:
     """Get a single task by ID.
 
@@ -151,9 +166,15 @@ async def fetch_task(
     Returns an error if the task doesn't exist or doesn't belong to the user.
 
     Args:
-        user_id: User ID for ownership checks (required)
         task_id: ID of the task to retrieve (required, must be > 0)
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     if task_id <= 0:
         return {"error": "task_id must be greater than 0"}
 
@@ -169,9 +190,8 @@ async def fetch_task(
 
 @tool(parse_docstring=True)
 async def create_task(
-    user_id: int,
     title: str,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
     description: Optional[str] = None,
     due_date: Optional[datetime] = None,
     ticktick_priority: Optional[int] = None,
@@ -187,7 +207,6 @@ async def create_task(
     adds meaningful context beyond the title - avoid duplicating the title.
 
     Args:
-        user_id: User ID for ownership (required)
         title: Concise task title without quotes, max 120 chars (required)
         description: Optional details that differ from title. Provide meaningful context or omit.
         due_date: Optional ISO datetime string if task has a deadline
@@ -198,10 +217,17 @@ async def create_task(
         ticktick_project_id: Optional TickTick project ID
 
     Examples:
-        - create_task(user_id=1, title="Review PR #456", description="Full code review focusing on security and performance", ticktick_tags=["code-review", "urgent"])
-        - create_task(user_id=1, title="Weekly team sync", due_date="2025-12-15T10:00:00", ticktick_priority=3)
-        - create_task(user_id=1, title="Fix login bug", ticktick_priority=5, ticktick_tags=["bug"])
+        - create_task(title="Review PR #456", description="Full code review focusing on security and performance", ticktick_tags=["code-review", "urgent"])
+        - create_task(title="Weekly team sync", due_date="2025-12-15T10:00:00", ticktick_priority=3)
+        - create_task(title="Fix login bug", ticktick_priority=5, ticktick_tags=["bug"])
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     # Validate and clean title
     if not title:
         return {"error": "title cannot be empty"}
@@ -256,9 +282,8 @@ async def create_task(
 
 @tool(parse_docstring=True)
 async def update_task(
-    user_id: int,
     task_id: int,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
     title: Optional[str] = None,
     description: Optional[str] = None,
     due_date: Optional[datetime] = None,
@@ -274,7 +299,6 @@ async def update_task(
     to change. The tool will track what changed and return a summary.
 
     Args:
-        user_id: User ID for ownership validation (required)
         task_id: ID of task to update (required, must be > 0)
         title: New title (max 120 chars, quotes removed automatically)
         description: New description or null to clear
@@ -285,6 +309,13 @@ async def update_task(
         time_estimate: Duration in minutes (must be > 0)
         all_day: All day event flag
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     if task_id <= 0:
         return {"error": "task_id must be greater than 0"}
 
@@ -369,9 +400,8 @@ async def update_task(
 
 @tool(parse_docstring=True)
 async def complete_task(
-    user_id: int,
     task_id: int,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
 ) -> Dict[str, Any]:
     """Mark a task as completed.
 
@@ -379,9 +409,15 @@ async def complete_task(
     mark it as done. This changes the task status to COMPLETED.
 
     Args:
-        user_id: User ID for ownership checks (required)
         task_id: ID of the task to complete (required, must be > 0)
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     if task_id <= 0:
         return {"error": "task_id must be greater than 0"}
 
@@ -408,9 +444,8 @@ async def complete_task(
 
 @tool(parse_docstring=True)
 async def delete_task(
-    user_id: int,
     task_id: int,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
     confirm: bool = False,
     soft_delete: bool = True,
 ) -> Dict[str, Any]:
@@ -420,11 +455,17 @@ async def delete_task(
     DELETED but preserves the record. Hard delete permanently removes it.
 
     Args:
-        user_id: User ID for ownership checks (required)
         task_id: ID of the task to delete (required, must be > 0)
         confirm: Must be true for destructive actions (default: False)
         soft_delete: If true, soft delete (preserve record); if false, hard delete (default: True)
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     if task_id <= 0:
         return {"error": "task_id must be greater than 0"}
 
@@ -454,9 +495,8 @@ async def delete_task(
 
 @tool(parse_docstring=True)
 async def quick_analyze_task(
-    user_id: int,
     description: str,
-    db: Annotated[AsyncSession, InjectedToolArg()],
+    config: Annotated[RunnableConfig, InjectedToolArg()],
     title: Optional[str] = None,
     due_date: Optional[datetime] = None,
 ) -> Dict[str, Any]:
@@ -467,11 +507,17 @@ async def quick_analyze_task(
     the LLM is unavailable.
 
     Args:
-        user_id: User ID for profile context (required)
         description: Task description to analyze (required, min 1 char)
         title: Optional task title (defaults to first 80 chars of description)
         due_date: Optional due date as ISO datetime
     """
+    # Extract injected parameters from config
+    user_id = config.get("configurable", {}).get("user_id")
+    db = config.get("configurable", {}).get("db")
+
+    if not user_id or not db:
+        return {"error": "Missing user_id or db in config"}
+
     if not description or len(description) < 1:
         return {"error": "description must have at least 1 character"}
 

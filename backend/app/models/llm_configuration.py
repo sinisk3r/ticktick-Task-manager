@@ -76,3 +76,4 @@ class LLMConfiguration(Base):
     def requires_base_url(self) -> bool:
         """Check if this provider requires a base URL."""
         return self.provider == LLMProvider.OLLAMA
+

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Context - Product Strategy Definition</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        header {
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        h1 { margin-bottom: 10px; font-size: 2.5rem; color: #0f172a; }
+        p.subtitle { color: #64748b; font-size: 1.1rem; }
+        
+        section {
+            background: var(--surface);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+        
+        h2 {
+            border-bottom: 2px solid var(--bg);
+            padding-bottom: 10px;
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+        
+        .form-group { margin-bottom: 25px; }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #334155;
+        }
+        .help-text {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        textarea, input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        textarea { min-height: 100px; resize: vertical; }
+        
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 6px;
+        }
+        .checkbox-item:hover { background: #f1f5f9; }
+        input[type="checkbox"] { margin-top: 5px; }
+        
+        .actions {
+            position: sticky;
+            bottom: 20px;
+            background: var(--surface);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+            border: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        button.secondary {
+            background-color: #e2e8f0;
+            color: #475569;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Context Strategy Builder</h1>
+        <p class="subtitle">Define the Vision, MVP, and Go-to-Market Strategy</p>
+    </header>
+
+    <form id="strategyForm">
+        
+        <!-- SECTION 1: VISION -->
+        <section>
+            <h2>1. Vision & Goals</h2>
+            
+            <div class="form-group">
+                <label>Elevator Pitch (The "Why")</label>
+                <span class="help-text">Finish this sentence: "For busy professionals who lack time, Context is a task manager that..."</span>
+                <textarea name="vision_pitch" placeholder="Example: ...automatically plans their day and protects their wellbeing, unlike standard todo lists that just stack up tasks."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>The 3-Year Dream</label>
+                <span class="help-text">If everything goes perfectly, what does Context become in 3 years?</span>
+                <textarea name="vision_longterm" placeholder="e.g. The OS for personal productivity that replaces my calendar, EA, and project manager."></textarea>
+            </div>
+        </section>
+
+        <!-- SECTION 2: MVP DEFINITION -->
+        <section>
+            <h2>2. The MVP (Minimum Viable Product)</h2>
+            
+            <div class="form-group">
+                <label>Core Features (Select all that apply for V1)</label>
+                <div class="checkbox-group">
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="ticktick_sync" checked> TickTick Bi-directional Sync</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="matrix_view" checked> Eisenhower Matrix View</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="llm_analysis" checked> AI Urgency/Importance Analysis</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="workload_intel"> Workload Intelligence / Burnout Warning</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="email_drafts"> Contextual Email Drafts</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="voice_input"> Voice Input / Transcription</label>
+                    <label class="checkbox-item"><input type="checkbox" name="mvp_features" value="calendar_blocking"> Auto-Calendar Blocking</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>The "Wow" Moment</label>
+                <span class="help-text">What is the ONE specific interaction that will make a user say "I need this"?</span>
+                <textarea name="mvp_wow" placeholder="e.g. When I forward an email and it instantly appears as a categorized task with a drafted reply."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>What are we NOT doing yet?</label>
+                <span class="help-text">Crucial for scope control. What cool features are we explicitly cutting from V1?</span>
+                <textarea name="mvp_anticov" placeholder="e.g. Not building a mobile app yet, not doing team collaboration features..."></textarea>
+            </div>
+        </section>
+
+        <!-- SECTION 3: MARKET & COMPETITION -->
+        <section>
+            <h2>3. Market Landscape</h2>
+            
+            <div class="form-group">
+                <label>Ideal Customer Persona (ICP)</label>
+                <span class="help-text">Who gets the most value? Be specific (e.g. "Agency owners managing 5+ projects")</span>
+                <textarea name="market_persona"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Competitive Advantage (The "Moat")</label>
+                <span class="help-text">Vs. Motion, Reclaim, or TickTick's native AI. Why us?</span>
+                <textarea name="market_advantage" placeholder="e.g. Privacy focus (Local LLM), deeper psychological focus (burnout prevention vs just efficiency)..."></textarea>
+            </div>
+        </section>
+
+        <!-- SECTION 4: PRODUCT STATUS -->
+        <section>
+            <h2>4. Current Status</h2>
+            
+            <div class="form-group">
+                <label>Current Maturity Level</label>
+                <select name="status_maturity" style="width: 100%; padding: 12px; border-radius: 8px;">
+                    <option value="concept">Concept / Prototype</option>
+                    <option value="alpha" selected>Alpha (Works for me, buggy)</option>
+                    <option value="beta">Beta (Ready for early users)</option>
+                    <option value="scaling">Production Ready</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Biggest Risk / Challenge</label>
+                <span class="help-text">Technical, adoption, or resource risk?</span>
+                <textarea name="status_risk" placeholder="e.g. Latency of local LLMs, TickTick API rate limits..."></textarea>
+            </div>
+        </section>
+
+        <!-- SECTION 5: BUSINESS & VALUE -->
+        <section>
+            <h2>5. Value & Pricing</h2>
+            
+            <div class="form-group">
+                <label>Hypothetical Price Point</label>
+                <span class="help-text">Even if free now, what is the fair market value?</span>
+                <input type="text" name="business_price" placeholder="e.g. $20/mo (comparable to Motion) or Free/Open Source">
+            </div>
+
+            <div class="form-group">
+                <label>Primary Value Metric</label>
+                <span class="help-text">How does the user measure success?</span>
+                <input type="text" name="business_metric" placeholder="e.g. Hours saved per week, or 'Tasks actually completed'">
+            </div>
+        </section>
+
+    </form>
+
+    <div class="actions">
+        <div>
+            <strong>Ready?</strong> Click export to get a file to send back to the AI agent.
+        </div>
+        <button type="button" onclick="exportData()">Download Answers (JSON)</button>
+    </div>
+
+    <script>
+        function exportData() {
+            const form = document.getElementById('strategyForm');
+            const formData = new FormData(form);
+            const data = {};
+            
+            // Handle standard fields
+            for (let [key, value] of formData.entries()) {
+                if (data[key]) {
+                    if (!Array.isArray(data[key])) {
+                        data[key] = [data[key]];
+                    }
+                    data[key].push(value);
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            // Handle unchecked checkboxes (if needed, but FormData usually allows multiples)
+            // Just ensuring easy reading format
+            
+            const jsonString = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonString], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "context_strategy_answers.json";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

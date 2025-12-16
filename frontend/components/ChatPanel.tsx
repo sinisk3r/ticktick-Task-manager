@@ -46,6 +46,12 @@ const renderMarkdownLite = (value: string) => {
 const EventRow = ({ event }: { event: AgentEvent }) => {
     const type = event.type;
     const data = event.data || {};
+
+    // For message_chunk events, render as prose text
+    if (type === "message_chunk" && event.text) {
+        return null; // These will be accumulated and rendered separately
+    }
+
     const summary =
         data.summary ||
         data.text ||
@@ -62,22 +68,118 @@ const EventRow = ({ event }: { event: AgentEvent }) => {
         tool_request: <ClipboardList className="size-3.5 text-muted-foreground" />,
         tool_result: <Check className="size-3.5 text-emerald-500" />,
         message: <Sparkles className="size-3.5 text-primary" />,
+        message_chunk: <Sparkles className="size-3.5 text-primary" />,
         error: <AlertTriangle className="size-3.5 text-destructive" />,
         done: <Check className="size-3.5 text-muted-foreground" />,
     };
 
     return (
-        <div className="flex items-start gap-2 text-xs leading-tight">
+        <div className="flex items-start gap-2 text-xs leading-tight px-3 py-2 rounded-md border border-border/40 bg-muted/20">
             <span className="mt-0.5">{iconMap[type] || <Sparkles className="size-3.5" />}</span>
             <div className="flex-1">
                 <div className="font-medium capitalize text-foreground/80">{type.replace("_", " ")}</div>
-                {summary ? <p className="text-muted-foreground">{summary}</p> : null}
+                {summary ? <p className="text-muted-foreground mt-0.5">{summary}</p> : null}
                 {type === "tool_request" && data.tool ? (
-                    <p className="text-[11px] text-muted-foreground/80">Tool: {data.tool}</p>
+                    <p className="text-[11px] text-muted-foreground/80 mt-0.5">Tool: {data.tool}</p>
                 ) : null}
             </div>
         </div>
     );
+};
+
+// Render events chronologically, interleaving text chunks and tool actions
+const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string, isStreaming: boolean) => {
+    if (!events.length) {
+        // No events yet - show animated thinking if streaming, otherwise show content
+        if (!fallbackContent && isStreaming) {
+            return (
+                <div className="flex items-center gap-2">
+                    <AnimatedThinkingText />
+                </div>
+            );
+        }
+        // Fall back to rendering content as-is
+        return (
+            <div
+                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                dangerouslySetInnerHTML={{
+                    __html: renderMarkdownLite(fallbackContent || ""),
+                }}
+            />
+        );
+    }
+
+    const segments: JSX.Element[] = [];
+    let currentTextBuffer = "";
+
+    for (let i = 0; i < events.length; i++) {
+        const event = events[i];
+
+        if (event.type === "message_chunk" && event.text) {
+            // Accumulate text chunks
+            currentTextBuffer += event.text;
+        } else if (event.type === "message" && event.data.message) {
+            // Complete message (from tool summaries, etc.)
+            currentTextBuffer += "\n" + event.data.message;
+        } else {
+            // Non-text event (tool call, step, etc.) - flush text buffer first, then render the event
+            if (currentTextBuffer.trim()) {
+                segments.push(
+                    <div
+                        key={`text-${i}`}
+                        className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                        dangerouslySetInnerHTML={{
+                            __html: renderMarkdownLite(currentTextBuffer.trim()),
+                        }}
+                    />
+                );
+                currentTextBuffer = "";
+            }
+
+            // Render tool events inline (chronologically)
+            if (event.type === "tool_request" || event.type === "tool_result" || event.type === "step") {
+                segments.push(
+                    <div key={`event-${event.id}`} className="my-2">
+                        <EventRow event={event} />
+                    </div>
+                );
+            }
+        }
+    }
+
+    // Flush remaining text
+    if (currentTextBuffer.trim()) {
+        segments.push(
+            <div
+                key="text-final"
+                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                dangerouslySetInnerHTML={{
+                    __html: renderMarkdownLite(currentTextBuffer.trim()),
+                }}
+            />
+        );
+    }
+
+    // If no segments, fall back to content or animated thinking
+    if (segments.length === 0) {
+        if (!fallbackContent && isStreaming) {
+            return (
+                <div className="flex items-center gap-2">
+                    <AnimatedThinkingText />
+                </div>
+            );
+        }
+        return (
+            <div
+                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                dangerouslySetInnerHTML={{
+                    __html: renderMarkdownLite(fallbackContent || ""),
+                }}
+            />
+        );
+    }
+
+    return <>{segments}</>;
 };
 
 const AgentTimeline = ({
@@ -91,42 +193,74 @@ const AgentTimeline = ({
     onConfirm: () => void;
     onCancel: () => void;
 }) => {
-    const actionable = events.filter(
-        (evt) =>
-            evt.type === "tool_request" ||
-            evt.type === "tool_result" ||
-            evt.type === "step" ||
-            evt.type === "error",
-    );
-
-    if (!actionable.length && !pendingAction) return null;
+    // Only show for pending confirmations (events are now rendered chronologically inline)
+    if (!pendingAction) return null;
 
     return (
         <div className="mt-2 rounded-md border border-border/60 bg-muted/40">
-            <div className="flex items-center justify-between px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <span>Agent actions</span>
-                <Sparkles className="size-3.5" />
-            </div>
-            <div className="divide-y divide-border/60 px-3 py-2 space-y-2">
-                {actionable.map((evt) => (
-                    <EventRow key={evt.id} event={evt} />
-                ))}
-                {pendingAction ? (
-                    <div className="flex items-center gap-2 text-xs">
-                        <AlertTriangle className="size-3.5 text-amber-500" />
-                        <span className="flex-1 text-muted-foreground">
-                            {pendingAction.tool} needs confirmation.
-                        </span>
-                        <Button size="xs" variant="destructive" onClick={onConfirm}>
-                            Confirm
-                        </Button>
-                        <Button size="xs" variant="ghost" onClick={onCancel}>
-                            Cancel
-                        </Button>
-                    </div>
-                ) : null}
+            <div className="divide-y divide-border/60 px-3 py-2">
+                <div className="flex items-center gap-2 text-xs">
+                    <AlertTriangle className="size-3.5 text-amber-500" />
+                    <span className="flex-1 text-muted-foreground">
+                        {pendingAction.tool} needs confirmation.
+                    </span>
+                    <Button size="xs" variant="destructive" onClick={onConfirm}>
+                        Confirm
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={onCancel}>
+                        Cancel
+                    </Button>
+                </div>
             </div>
         </div>
+    );
+};
+
+// Animated thinking text component that cycles through creative words with typing effect
+const AnimatedThinkingText = () => {
+    const words = ["Planning", "Thinking", "Doodling", "Musing", "Dreaming", "Scribbling", "Sketching"];
+    // Randomize starting word index so it doesn't always start with "Planning"
+    const [currentWordIndex, setCurrentWordIndex] = useState(() => Math.floor(Math.random() * words.length));
+    const [displayText, setDisplayText] = useState("");
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    useEffect(() => {
+        const currentWord = words[currentWordIndex];
+        const typingSpeed = isDeleting ? 50 : 100; // Faster when deleting
+        const pauseAfterTyping = 2000; // Pause before starting to delete
+        const pauseAfterDeleting = 200; // Brief pause before next word
+
+        let timeout: NodeJS.Timeout;
+
+        if (!isDeleting && displayText === currentWord) {
+            // Finished typing, pause before deleting
+            timeout = setTimeout(() => setIsDeleting(true), pauseAfterTyping);
+        } else if (isDeleting && displayText === "") {
+            // Finished deleting, move to next word
+            timeout = setTimeout(() => {
+                setIsDeleting(false);
+                setCurrentWordIndex((prev) => (prev + 1) % words.length);
+            }, pauseAfterDeleting);
+        } else if (!isDeleting) {
+            // Typing character by character
+            timeout = setTimeout(() => {
+                setDisplayText(currentWord.substring(0, displayText.length + 1));
+            }, typingSpeed);
+        } else {
+            // Deleting character by character
+            timeout = setTimeout(() => {
+                setDisplayText(currentWord.substring(0, displayText.length - 1));
+            }, typingSpeed);
+        }
+
+        return () => clearTimeout(timeout);
+    }, [displayText, isDeleting, currentWordIndex]);
+
+    return (
+        <>
+            <span className="animate-shake inline-block text-base">✏️</span>
+            <span className="text-muted-foreground">{displayText}...</span>
+        </>
     );
 };
 
@@ -176,7 +310,7 @@ const MessageBubble = ({
             >
                 {isAssistant ? (
                     <div className="space-y-2">
-                        {showThinking && thinking ? (
+                        {showThinking && thinking && thinking.trim() ? (
                             <div className="rounded-md border border-border/60 bg-muted/50 text-muted-foreground px-3 py-2 shadow-sm">
                                 <button
                                     type="button"
@@ -184,11 +318,13 @@ const MessageBubble = ({
                                     onClick={() => setCollapsed((v) => !v)}
                                 >
                                     {isStreaming && !collapsed ? (
-                                        <Loader2 className="size-3 animate-spin" />
+                                        <AnimatedThinkingText />
                                     ) : (
-                                        <Check className="size-3 text-foreground/70" />
+                                        <>
+                                            <Check className="size-3 text-foreground/70" />
+                                            <span className="text-muted-foreground">Thinking</span>
+                                        </>
                                     )}
-                                    <span>Thinking…</span>
                                 </button>
                                 <div
                                     className={cn(
@@ -200,12 +336,8 @@ const MessageBubble = ({
                                 </div>
                             </div>
                         ) : null}
-                        <div
-                            className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
-                            dangerouslySetInnerHTML={{
-                                __html: renderMarkdownLite(message.content || "Thinking…"),
-                            }}
-                        />
+                        {/* Render events chronologically, interleaving text and tool calls */}
+                        {renderChronologicalEvents(message.events, message.content, isStreaming)}
                         <AgentTimeline
                             events={message.events}
                             pendingAction={pendingAction}
