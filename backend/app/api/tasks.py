@@ -20,6 +20,7 @@ from app.services import OllamaService
 from app.services.ticktick import ticktick_service
 from app.services.prompt_utils import build_profile_context
 from app.services.llm_ollama import OllamaService as OllamaSuggestionService
+from app.services.quadrant_calculator import QuadrantCalculator
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -278,6 +279,14 @@ async def create_task(
         status=TaskStatus.ACTIVE,
         is_sorted=False  # Start in unsorted list
     )
+
+    # Auto-calculate initial quadrant using rule-based logic
+    calculated_quadrant = QuadrantCalculator.calculate_quadrant(
+        ticktick_priority=task_data.ticktick_priority,
+        due_date=task_data.due_date,
+    )
+    new_task.eisenhower_quadrant = calculated_quadrant
+    new_task.quadrant_calculation_source = 'rules'
 
     # NOTE: NO automatic LLM analysis.
     # Task is created as-is without urgency/importance scores.
@@ -827,12 +836,43 @@ async def update_task(
     changes = {}
     update_data = task_update.model_dump(exclude_unset=True)
 
+    # Track old values for quadrant recalculation
+    old_priority = task.ticktick_priority
+    old_due_date = task.due_date
+
     for field, value in update_data.items():
         if hasattr(task, field):
             old_value = getattr(task, field)
             if old_value != value:
                 changes[field] = value
                 setattr(task, field, value)
+
+    # Auto-recalculate quadrant if no manual override and priority/date changed
+    if task.manual_quadrant_override is None:
+        should_recalculate = QuadrantCalculator.should_recalculate(
+            old_priority=old_priority,
+            new_priority=task.ticktick_priority,
+            old_due_date=old_due_date,
+            new_due_date=task.due_date,
+        )
+
+        if should_recalculate:
+            new_quadrant = QuadrantCalculator.calculate_quadrant(
+                ticktick_priority=task.ticktick_priority,
+                due_date=task.due_date,
+                urgency_score=task.urgency_score,
+                importance_score=task.importance_score,
+            )
+
+            if new_quadrant != task.eisenhower_quadrant:
+                old_quadrant = task.eisenhower_quadrant
+                task.eisenhower_quadrant = new_quadrant
+                task.quadrant_calculation_source = 'rules'
+                logger.info(
+                    f"Auto-updated quadrant for task {task_id}: "
+                    f"{old_quadrant} → {new_quadrant} (priority: {task.ticktick_priority}, "
+                    f"due: {task.due_date})"
+                )
 
     # Update sync metadata
     task.last_modified_at = datetime.utcnow()

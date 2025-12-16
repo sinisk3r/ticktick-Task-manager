@@ -62,6 +62,7 @@ class Task(Base):
     manual_override_source = Column(String(255), nullable=True)  # who/what set the override
     manual_override_at = Column(DateTime(timezone=True), nullable=True)
     manual_order = Column(Integer, nullable=True, index=True)  # per-quadrant manual ordering
+    quadrant_calculation_source = Column(String(50), nullable=True)  # 'llm' | 'rules' | 'manual'
 
     # Sorting Status
     is_sorted = Column(Boolean, default=False, nullable=False, index=True)  # False = Unsorted, True = In Matrix
