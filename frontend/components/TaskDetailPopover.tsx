@@ -11,7 +11,8 @@ import { DatePickerWithOptionalTime } from "@/components/DatePickerWithOptionalT
 import { api, API_BASE } from "@/lib/api"
 import { X, Trash2, AlertCircle, Sparkles, Calendar, Layout } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Task, EnhanceResponse } from "@/types/task"
+import { Task, EnhanceResponse, EnhancedSuggestion } from "@/types/task"
+import { EnhancedSuggestionPanel } from "@/components/EnhancedSuggestionPanel"
 import { ProjectSelector } from "@/components/metadata/ProjectSelector"
 import { TagsInput } from "@/components/metadata/TagsInput"
 import { RepeatPatternSelect } from "@/components/metadata/RepeatPatternSelect"
@@ -72,6 +73,7 @@ export function TaskDetailPopover({
   // AI State (simplified)
   const [enhancing, setEnhancing] = useState(false)
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
+  const [enhancedSuggestions, setEnhancedSuggestions] = useState<EnhancedSuggestion[]>([])
   const [rationale, setRationale] = useState<string | null>(null)
 
   // Fetch projects for matching
@@ -208,6 +210,15 @@ export function TaskDetailPopover({
 
   const processSuggestions = (response: EnhanceResponse) => {
     setRationale(response.rationale || null)
+
+    // NEW: Use enhanced suggestions if available
+    if (response.suggestions && response.suggestions.length > 0) {
+      setEnhancedSuggestions(response.suggestions)
+      setSuggestions([]) // Clear legacy suggestions
+      return
+    }
+
+    // LEGACY: Fall back to old format
     const newSuggestions: SuggestionItem[] = []
 
     if (response.suggested_description && response.suggested_description !== localTask.description) {
@@ -298,6 +309,40 @@ export function TaskDetailPopover({
       setSuggestions([])
       setRationale(null)
       toast.success("Applied AI suggestions")
+    }
+  }
+
+  const applyEnhancedSuggestions = async (selected: EnhancedSuggestion[]) => {
+    if (selected.length === 0) return
+
+    const updates: Partial<Task> = {}
+
+    for (const s of selected) {
+      if (s.type === 'description') {
+        updates.description = s.suggested
+      } else if (s.type === 'project') {
+        const projectData = typeof s.suggested === 'object' ? s.suggested : { name: s.suggested }
+        updates.project_id = projectData.id
+        updates.project_name = projectData.name
+        updates.ticktick_project_id = projectData.ticktick_project_id
+      } else if (s.type === 'reminder_time') {
+        updates.reminder_time = s.suggested
+      } else if (s.type === 'time_estimate') {
+        updates.time_estimate = s.suggested
+      } else if (s.type === 'tags') {
+        updates.ticktick_tags = s.suggested
+      } else if (s.type === 'start_date') {
+        updates.start_date = s.suggested
+      } else if (s.type === 'priority') {
+        updates.ticktick_priority = s.suggested
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await saveTask(updates)
+      setEnhancedSuggestions([])
+      setRationale(null)
+      toast.success(`Applied ${selected.length} suggestion${selected.length !== 1 ? 's' : ''}`)
     }
   }
 
@@ -503,7 +548,20 @@ export function TaskDetailPopover({
 
             {/* AI Suggestions Section */}
             <div className="border-t p-4 space-y-3 shrink-0 bg-background">
-              {suggestions.length === 0 && !enhancing && (
+              {/* NEW: Enhanced suggestions panel */}
+              {enhancedSuggestions.length > 0 && (
+                <EnhancedSuggestionPanel
+                  suggestions={enhancedSuggestions}
+                  onApply={applyEnhancedSuggestions}
+                  onDismiss={() => {
+                    setEnhancedSuggestions([])
+                    setRationale(null)
+                  }}
+                />
+              )}
+
+              {/* Get suggestions button (show only if no suggestions yet) */}
+              {suggestions.length === 0 && enhancedSuggestions.length === 0 && !enhancing && (
                 <Button
                   size="sm"
                   variant="outline"

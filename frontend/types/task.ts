@@ -64,7 +64,27 @@ export interface EnhanceRequest {
   enhance_time?: boolean
 }
 
+export interface EnhancedSuggestion {
+  type: string
+  current: any
+  suggested: any
+  current_display?: string
+  suggested_display: string
+  reason: string
+  confidence: number
+  priority: 'high' | 'medium' | 'low'
+}
+
 export interface EnhanceResponse {
+  // NEW: Multi-suggestion with confidence
+  suggestions?: EnhancedSuggestion[]
+  analysis?: {
+    urgency_score: number
+    importance_score: number
+    eisenhower_quadrant: string
+    effort_hours: number
+  }
+  // Legacy fields (backward compatibility)
   suggested_description?: string | null
   suggested_due?: string | null
   suggested_start?: string | null

@@ -210,8 +210,25 @@ class EnhanceRequest(BaseModel):
     enhance_time: bool = Field(True, description="Suggest time estimate/focus windows")
 
 
+class SuggestionItem(BaseModel):
+    """Individual suggestion with confidence score."""
+    type: str  # field type: description, project, tags, etc.
+    current: Optional[Any] = None
+    suggested: Any
+    current_display: Optional[str] = None
+    suggested_display: str
+    reason: str
+    confidence: float  # 0.0-1.0
+    priority: Optional[str] = None  # "high" | "medium" | "low"
+
+
 class EnhanceResponse(BaseModel):
-    """Structured enhancement suggestions (no automatic mutation)."""
+    """Structured enhancement suggestions with multi-suggestion support."""
+    # NEW: Grouped suggestions by field with confidence
+    suggestions: List[SuggestionItem] = Field(default_factory=list)
+    analysis: Optional[Dict[str, Any]] = None  # urgency, importance, quadrant, effort
+
+    # Legacy fields (backward compatibility)
     suggested_description: Optional[str] = None
     suggested_due: Optional[datetime] = None
     suggested_start: Optional[datetime] = None
@@ -506,7 +523,42 @@ async def enhance_task(
     )
 
     suggestions = suggestion_result.get("suggestions", []) or []
+    analysis = suggestion_result.get("analysis", {})
 
+    # NEW: Process all suggestions with confidence filtering
+    processed_suggestions: List[SuggestionItem] = []
+
+    for s in suggestions:
+        s_type = s.get("type")
+        confidence = s.get("confidence", 0.5)
+
+        # Filter low confidence suggestions
+        if confidence < 0.5:
+            continue
+
+        # Priority label based on confidence
+        priority = (
+            "high" if confidence >= 0.9
+            else "medium" if confidence >= 0.7
+            else "low"
+        )
+
+        processed_suggestions.append(SuggestionItem(
+            type=s_type,
+            current=s.get("current"),
+            suggested=s.get("suggested"),
+            current_display=s.get("current_display"),
+            suggested_display=s.get("suggested_display", str(s.get("suggested"))),
+            reason=s.get("reason", ""),
+            confidence=round(confidence, 2),
+            priority=priority,
+        ))
+
+    # Sort by confidence (descending) and limit to 12
+    processed_suggestions.sort(key=lambda x: x.confidence, reverse=True)
+    processed_suggestions = processed_suggestions[:12]
+
+    # Legacy processing for backward compatibility
     suggested_description: Optional[str] = None
     suggested_due: Optional[datetime] = None
     suggested_start: Optional[datetime] = None
@@ -571,6 +623,10 @@ async def enhance_task(
     rationale_text = "; ".join(rationales) if rationales else None
 
     return EnhanceResponse(
+        # NEW: Multi-suggestion with confidence
+        suggestions=processed_suggestions,
+        analysis=analysis,
+        # Legacy fields (backward compatibility)
         suggested_description=suggested_description,
         suggested_due=suggested_due,
         suggested_start=suggested_start,
