@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     X,
     Send,
@@ -62,7 +62,7 @@ const EventRow = ({ event }: { event: AgentEvent }) => {
         data.result?.analysis?.reasoning ||
         "";
 
-    const iconMap: Record<string, JSX.Element> = {
+    const iconMap: Record<string, React.ReactNode> = {
         thinking: <Wand2 className="size-3.5 text-muted-foreground" />,
         step: <Workflow className="size-3.5 text-muted-foreground" />,
         tool_request: <ClipboardList className="size-3.5 text-muted-foreground" />,
@@ -109,7 +109,7 @@ const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string
         );
     }
 
-    const segments: JSX.Element[] = [];
+    const segments: React.ReactNode[] = [];
     let currentTextBuffer = "";
 
     for (let i = 0; i < events.length; i++) {
@@ -204,10 +204,10 @@ const AgentTimeline = ({
                     <span className="flex-1 text-muted-foreground">
                         {pendingAction.tool} needs confirmation.
                     </span>
-                    <Button size="xs" variant="destructive" onClick={onConfirm}>
+                    <Button size="sm" variant="destructive" onClick={onConfirm}>
                         Confirm
                     </Button>
-                    <Button size="xs" variant="ghost" onClick={onCancel}>
+                    <Button size="sm" variant="ghost" onClick={onCancel}>
                         Cancel
                     </Button>
                 </div>
@@ -472,7 +472,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                                 <MessageBubble
                                     key={msg.id}
                                     message={msg}
-                                    showThinking={thinking && isLastAssistant}
+                                    showThinking={!!(thinking && isLastAssistant)}
                                     thinking={thinking && isLastAssistant ? thinking : undefined}
                                     isStreaming={isStreaming}
                                     pendingAction={isLastAssistant ? pendingAction : null}
@@ -488,6 +488,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                                     role: "assistant",
                                     content: "",
                                     createdAt: Date.now(),
+                                    events: [],
                                 }}
                                 showThinking
                                 thinking={thinking}

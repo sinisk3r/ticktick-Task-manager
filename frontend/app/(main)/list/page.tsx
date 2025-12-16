@@ -3,6 +3,7 @@
 import { useState, useMemo, memo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import useSWR, { mutate } from "swr"
+import { toast } from "sonner"
 import { TaskDetailPopover } from "@/components/TaskDetailPopover"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -14,8 +15,12 @@ import { Search, Plus, AlertCircle, Star, Trash2 } from "lucide-react"
 import { DialogTrigger } from "@/components/ui/dialog"
 import { api, API_BASE } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { getQuadrant } from "@/lib/taskUtils"
 import { format, isToday, isThisWeek, isPast } from "date-fns"
 import { Task, TasksResponse } from "@/types/task"
+
+import { ListTaskCard } from "@/components/ListTaskCard"
+import { QuickAddTaskModal } from "@/components/QuickAddTaskModal"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -24,6 +29,7 @@ export default function ListView() {
   const [filterBy, setFilterBy] = useState("all")
   const [groupBy, setGroupBy] = useState("none")
   const [searchQuery, setSearchQuery] = useState("")
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
 
   // Fetch tasks
   const { data, error, isLoading } = useSWR<TasksResponse>(
@@ -34,34 +40,10 @@ export default function ListView() {
 
   const tasks = data?.tasks || []
 
-  // Get effective quadrant
-  const getQuadrant = (task: Task) =>
-    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
-
-  // Get priority label
-  const getPriorityLabel = (priority: number) => {
-    const labels: { [key: number]: string } = {
-      0: "None",
-      1: "Low",
-      3: "Medium",
-      5: "High",
-    }
-    return labels[priority] || "None"
-  }
-
   // Check if overdue
   const isOverdue = (dueDate: string | null | undefined) => {
     if (!dueDate) return false
     return isPast(new Date(dueDate)) && !isToday(new Date(dueDate))
-  }
-
-  // Format due date
-  const formatDueDate = (dueDate: string | null | undefined) => {
-    if (!dueDate) return null
-    const date = new Date(dueDate)
-    if (isToday(date)) return "Today"
-    if (isThisWeek(date)) return format(date, "EEE")
-    return format(date, "MMM d")
   }
 
   // Process tasks (filter, sort, group)
@@ -215,14 +197,38 @@ export default function ListView() {
     )
   }
 
+  const handleToggleStatus = async (task: Task) => {
+    // Determine new status
+    const newStatus = task.status === 'completed' ? 'active' : 'completed';
+
+    // Optimistic update
+    const updatedTask = { ...task, status: newStatus };
+    handleTaskUpdate(updatedTask);
+
+    try {
+      await api.patch(`/api/tasks/${task.id}`, { status: newStatus });
+      toast.success(newStatus === 'completed' ? 'Task completed!' : 'Task reopened');
+    } catch (error) {
+      console.error("Failed to update task status:", error);
+      toast.error('Failed to update task status');
+      // Revert optimistic update on failure
+      handleTaskUpdate(task);
+    }
+  };
+
+  const handleTaskRefreshed = () => {
+    // Revalidate SWR
+    mutate(`${API_BASE}/api/tasks?user_id=1&status=active&limit=200`);
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-16 w-full" />
-        <div className="space-y-2">
+        <div className="space-y-4">
           {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-20 w-full" />
+            <Skeleton key={i} className="h-24 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -239,7 +245,7 @@ export default function ListView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">List View</h1>
@@ -249,7 +255,7 @@ export default function ListView() {
       </div>
 
       {/* Toolbar */}
-      <div className="bg-card p-4 rounded-lg border space-y-4">
+      <div className="bg-card p-4 rounded-lg border space-y-4 sticky top-0 z-10 shadow-sm backdrop-blur-xl bg-card/80">
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -264,7 +270,7 @@ export default function ListView() {
         {/* Filters and Controls */}
         <div className="flex flex-wrap gap-3">
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -276,7 +282,7 @@ export default function ListView() {
           </Select>
 
           <Select value={filterBy} onValueChange={setFilterBy}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -292,7 +298,7 @@ export default function ListView() {
           </Select>
 
           <Select value={groupBy} onValueChange={setGroupBy}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -304,8 +310,8 @@ export default function ListView() {
             </SelectContent>
           </Select>
 
-          <div className="ml-auto flex gap-2">
-            <Button>
+          <div className="ml-auto w-full md:w-auto">
+            <Button className="w-full md:w-auto" onClick={() => setIsQuickAddOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Task
             </Button>
@@ -314,7 +320,7 @@ export default function ListView() {
       </div>
 
       {/* Task List */}
-      <div className="space-y-6">
+      <div className="space-y-8">
         {processedTasks.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-muted-foreground">
@@ -324,20 +330,20 @@ export default function ListView() {
         ) : (
           processedTasks.map((group) => (
             <div key={group.title}>
-              <h2 className="text-sm font-semibold text-muted-foreground mb-3">
-                {group.title} ({group.tasks.length})
+              <h2 className="text-sm font-semibold text-muted-foreground mb-4 pl-1">
+                {group.title} <span className="text-xs opacity-70">({group.tasks.length})</span>
               </h2>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <AnimatePresence mode="popLayout">
                   {group.tasks.map((task) => (
                     <motion.div
                       key={task.id}
                       layout
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ duration: 0.2 }}
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95, height: 0, marginBottom: 0, marginTop: 0, overflow: "hidden" }}
+                      transition={{ duration: 0.3 }}
                     >
                       <TaskDetailPopover
                         task={task}
@@ -345,7 +351,10 @@ export default function ListView() {
                         onDelete={handleTaskDelete}
                         trigger={
                           <DialogTrigger asChild>
-                            <TaskListItem task={task} />
+                            <ListTaskCard
+                              task={task}
+                              onToggleStatus={handleToggleStatus}
+                            />
                           </DialogTrigger>
                         }
                       />
@@ -357,103 +366,13 @@ export default function ListView() {
           ))
         )}
       </div>
+
+      {/* Quick Add Modal */}
+      <QuickAddTaskModal
+        open={isQuickAddOpen}
+        onOpenChange={setIsQuickAddOpen}
+        onTaskAdded={handleTaskRefreshed}
+      />
     </div>
   )
 }
-
-// Memoized checkbox checkmark SVG component
-const CheckIcon = memo(() => (
-  <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-  </svg>
-))
-CheckIcon.displayName = "CheckIcon"
-
-// Priority labels lookup (moved outside component to avoid recreation)
-const PRIORITY_LABELS: { [key: number]: string } = {
-  0: "None",
-  1: "Low",
-  3: "Medium",
-  5: "High",
-}
-
-const TaskListItem = memo(function TaskListItem({ task }: { task: Task }) {
-  // Pre-compute values with useMemo to avoid recalculation
-  const quadrant = useMemo(
-    () => task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant,
-    [task.manual_quadrant_override, task.effective_quadrant, task.eisenhower_quadrant]
-  )
-
-  const priorityLabel = useMemo(
-    () => PRIORITY_LABELS[task.ticktick_priority || 0] || "None",
-    [task.ticktick_priority]
-  )
-
-  const { isOverdue: taskIsOverdue, formattedDate } = useMemo(() => {
-    if (!task.due_date) {
-      return { isOverdue: false, formattedDate: null }
-    }
-    const date = new Date(task.due_date)
-    const overdue = isPast(date) && !isToday(date)
-    let formatted: string | null = null
-    if (isToday(date)) {
-      formatted = "Today"
-    } else if (isThisWeek(date)) {
-      formatted = format(date, "EEE")
-    } else {
-      formatted = format(date, "MMM d")
-    }
-    return { isOverdue: overdue, formattedDate: formatted }
-  }, [task.due_date])
-
-  const isCompleted = task.status === "completed"
-  const checkboxClassName = isCompleted
-    ? "size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow flex items-center justify-center bg-primary text-primary-foreground border-primary"
-    : "size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow flex items-center justify-center border-input dark:bg-input/30"
-
-  return (
-    <div className="group w-full flex items-center gap-3 p-4 bg-card rounded-lg border hover:border-primary cursor-pointer transition-all text-left">
-      {/* Visual checkbox indicator (non-interactive) */}
-      <div className={checkboxClassName} aria-hidden="true">
-        {isCompleted && <CheckIcon />}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="font-medium truncate">{task.title}</div>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {task.project_name && (
-            <Badge variant="outline" className="text-xs">
-              {task.project_name}
-            </Badge>
-          )}
-          {(task.ticktick_priority || 0) > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {priorityLabel}
-            </Badge>
-          )}
-          {formattedDate && (
-            <Badge variant={taskIsOverdue ? "destructive" : "default"} className="text-xs">
-              {formattedDate}
-            </Badge>
-          )}
-          {quadrant && (
-            <Badge variant="outline" className="text-xs">
-              {quadrant}
-            </Badge>
-          )}
-          {task.ticktick_tags?.map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-xs">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      </div>
-
-      <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-        <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={(e) => e.stopPropagation()}>
-          <Star className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  )
-})

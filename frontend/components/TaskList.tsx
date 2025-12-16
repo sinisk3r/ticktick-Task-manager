@@ -1,37 +1,21 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { toast } from "sonner"
 import { TaskCard } from "./TaskCard"
 import { QuadrantFilter } from "./QuadrantFilter"
 import { EisenhowerMatrix } from "./EisenhowerMatrix"
 import { api } from "@/lib/api"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, RefreshCw, LayoutGrid, List } from "lucide-react"
+import { AlertCircle, RefreshCw, LayoutGrid, List, CheckCircle2, Trash2, Layers } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getQuadrant } from "@/lib/taskUtils"
 
-interface Task {
-  id: number
-  title: string
-  description?: string
-  urgency_score: number
-  importance_score: number
-  eisenhower_quadrant: string
-  effective_quadrant?: string
-  analysis_reasoning?: string
-  manual_quadrant_override?: string
-  manual_override_reason?: string
-  manual_override_at?: string
-  status: string
-  created_at: string
-  ticktick_task_id?: string
-}
+import { Task, TasksResponse } from "@/types/task"
 
-interface TasksResponse {
-  tasks: Task[]
-  total: number
-}
+type TaskStatus = "active" | "completed" | "deleted"
 
 export function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -39,9 +23,8 @@ export function TaskList() {
   const [error, setError] = useState<string | null>(null)
   const [selectedQuadrant, setSelectedQuadrant] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-
-  const getQuadrant = (task: Task) =>
-    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
+  const [currentStatus, setCurrentStatus] = useState<TaskStatus>("active")
+  const [viewMode, setViewMode] = useState<"matrix" | "list">("matrix")
 
   // Calculate task counts by quadrant
   const taskCounts = {
@@ -54,16 +37,17 @@ export function TaskList() {
 
   const fetchTasks = async () => {
     try {
+      setLoading(true)
       setError(null)
 
       // Build query parameters
       const params = new URLSearchParams({
         user_id: "1", // Hardcoded for single-user mode
-        status: "active",
+        status: currentStatus,
         limit: "100",
       })
 
-      if (selectedQuadrant) {
+      if (selectedQuadrant && currentStatus === "active") {
         params.append("quadrant", selectedQuadrant)
       }
 
@@ -74,7 +58,9 @@ export function TaskList() {
       setTasks(response.tasks || [])
     } catch (err: any) {
       console.error("Failed to fetch tasks:", err)
-      setError(err.message || "Failed to load tasks")
+      const errorMessage = err.message || "Failed to load tasks"
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -82,20 +68,47 @@ export function TaskList() {
   }
 
   useEffect(() => {
+    // Reset view mode when switching status
+    if (currentStatus !== "active") {
+      setViewMode("list")
+    }
     fetchTasks()
-  }, [selectedQuadrant])
+  }, [currentStatus, selectedQuadrant])
 
   const handleRefresh = async () => {
     setRefreshing(true)
     await fetchTasks()
   }
 
-  // Filter tasks based on selected quadrant
-  const filteredTasks = selectedQuadrant
-    ? tasks.filter((task) => getQuadrant(task) === selectedQuadrant)
-    : tasks
+  const handleTaskUpdate = (updatedTask: Task) => {
+    // If we are in "active" view and task becomes "completed" or "deleted", remove it
+    if (currentStatus === "active" && updatedTask.status !== "active") {
+      setTasks(prev => prev.filter(t => t.id !== updatedTask.id))
+      return
+    }
 
-  if (loading) {
+    // If we are in "completed" view and task becomes "active" (uncheck), remove it
+    if (currentStatus === "completed" && updatedTask.status !== "completed") {
+      setTasks(prev => prev.filter(t => t.id !== updatedTask.id))
+      return
+    }
+
+    // If we are in "deleted" view and task is restored (status change), remove it
+    if (currentStatus === "deleted" && updatedTask.status !== "deleted") {
+      setTasks(prev => prev.filter(t => t.id !== updatedTask.id))
+      return
+    }
+
+    // Otherwise update in place
+    setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t))
+  }
+
+  const handleTaskDelete = (taskId: number) => {
+    // Optimistic update
+    setTasks(prev => prev.filter(t => t.id !== taskId))
+  }
+
+  if (loading && !refreshing) {
     return (
       <div className="space-y-6">
         <div className="mb-6">
@@ -130,87 +143,123 @@ export function TaskList() {
     )
   }
 
-  if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 px-4">
-        <div className="text-center max-w-md">
-          <div className="text-6xl mb-4">📋</div>
-          <h3 className="text-xl font-semibold mb-2 text-gray-200">
-            No tasks yet
-          </h3>
-          <p className="text-gray-400 mb-6">
-            Sync your TickTick tasks from the Analyze tab to get started with
-            AI-powered task prioritization.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <Tabs defaultValue="matrix" className="space-y-6">
-      {/* Header with view toggle and refresh button */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      {/* Header with Status Tabs and Refresh */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">My Tasks</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {tasks.length} task{tasks.length !== 1 ? "s" : ""} total
-          </p>
+          {/* Title or similar if needed */}
         </div>
-        <div className="flex items-center gap-3">
-          <TabsList>
-            <TabsTrigger value="matrix" className="flex items-center gap-2">
-              <LayoutGrid className="h-4 w-4" />
-              Matrix
+
+        <Tabs value={currentStatus} onValueChange={(v) => { setCurrentStatus(v as TaskStatus); setSelectedQuadrant(null); }} className="w-full md:w-auto">
+          <TabsList className="grid w-full grid-cols-3 md:w-[400px]">
+            <TabsTrigger value="active" className="flex items-center gap-2">
+              <Layers className="h-4 w-4" /> Active
             </TabsTrigger>
-            <TabsTrigger value="list" className="flex items-center gap-2">
-              <List className="h-4 w-4" />
-              List
+            <TabsTrigger value="completed" className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" /> Done
+            </TabsTrigger>
+            <TabsTrigger value="deleted" className="flex items-center gap-2">
+              <Trash2 className="h-4 w-4" /> Bin
             </TabsTrigger>
           </TabsList>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            <RefreshCw
-              className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-        </div>
+        </Tabs>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="w-full md:w-auto"
+        >
+          <RefreshCw
+            className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
+          />
+          Refresh
+        </Button>
       </div>
 
-      {/* Matrix View */}
-      <TabsContent value="matrix" className="mt-6">
-        <EisenhowerMatrix tasks={tasks} onTasksUpdate={setTasks} refresh={handleRefresh} />
-      </TabsContent>
+      {currentStatus === "active" ? (
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "matrix" | "list")} className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">Active Tasks</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {tasks.length} task{tasks.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <TabsList>
+              <TabsTrigger value="matrix" className="flex items-center gap-2">
+                <LayoutGrid className="h-4 w-4" />
+                Matrix
+              </TabsTrigger>
+              <TabsTrigger value="list" className="flex items-center gap-2">
+                <List className="h-4 w-4" />
+                List
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-      {/* List View */}
-      <TabsContent value="list" className="mt-6 space-y-6">
-        {/* Quadrant Filter */}
-        <QuadrantFilter
-          selectedQuadrant={selectedQuadrant}
-          onQuadrantChange={setSelectedQuadrant}
-          taskCounts={taskCounts}
-        />
+          <TabsContent value="matrix" className="mt-6">
+            <EisenhowerMatrix tasks={tasks} onTasksUpdate={setTasks} refresh={handleRefresh} />
+          </TabsContent>
 
-        {/* Task Cards Grid */}
-        {filteredTasks.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-400">
-              No tasks in {selectedQuadrant}. Try selecting a different quadrant.
+          <TabsContent value="list" className="mt-6 space-y-6">
+            <QuadrantFilter
+              selectedQuadrant={selectedQuadrant}
+              onQuadrantChange={setSelectedQuadrant}
+              taskCounts={taskCounts}
+            />
+
+            {tasks.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-gray-400">
+                  No active tasks found.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {tasks.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onUpdate={handleTaskUpdate}
+                    onDelete={handleTaskDelete}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-foreground capitalize">{currentStatus} Tasks</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             </p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTasks.map((task) => (
-              <TaskCard key={task.id} task={task} />
-            ))}
-          </div>
-        )}
-      </TabsContent>
-    </Tabs>
+
+          {tasks.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-400">
+                No {currentStatus} tasks.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onUpdate={handleTaskUpdate}
+                  onDelete={handleTaskDelete}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

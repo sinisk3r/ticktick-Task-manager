@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { UnsortedTaskCard } from "./UnsortedTaskCard";
 import { API_BASE } from "@/lib/api";
@@ -27,14 +28,18 @@ export function UnsortedList() {
       });
 
       if (!response.ok) {
-        console.error("Analysis failed:", await response.text());
+        const errorText = await response.text();
+        console.error("Analysis failed:", errorText);
+        toast.error("Failed to analyze task");
         return;
       }
 
       // Refresh the unsorted list
       mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`);
+      toast.success("Task analyzed successfully");
     } catch (error) {
       console.error("Analysis failed:", error);
+      toast.error("Failed to analyze task");
     }
   };
 
@@ -47,15 +52,19 @@ export function UnsortedList() {
       });
 
       if (!response.ok) {
-        console.error("Sort failed:", await response.text());
+        const errorText = await response.text();
+        console.error("Sort failed:", errorText);
+        toast.error("Failed to sort task");
         return;
       }
 
       // Refresh both unsorted list and main tasks list
       mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`);
       mutate(`${API_BASE}/api/tasks?user_id=1`);
+      toast.success(`Task moved to ${quadrant}`);
     } catch (error) {
       console.error("Sort failed:", error);
+      toast.error("Failed to sort task");
     }
   };
 
@@ -74,18 +83,45 @@ export function UnsortedList() {
       });
 
       if (!response.ok) {
-        console.error("Batch analysis failed:", await response.text());
+        const errorText = await response.text();
+        console.error("Batch analysis failed:", errorText);
+        toast.error("Failed to analyze tasks");
         return;
       }
 
       // Refresh the unsorted list
       mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`);
+      toast.success(`Analyzed ${taskIds.length} tasks`);
     } catch (error) {
       console.error("Batch analysis failed:", error);
+      toast.error("Failed to analyze tasks");
     } finally {
       setAnalyzing(false);
     }
   };
+
+  const handleTaskUpdate = (updatedTask: any) => {
+    // If task is completed or deleted or sorted, removed from unsorted list
+    if (updatedTask.status === "completed" || updatedTask.status === "deleted" || updatedTask.is_sorted) {
+      mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`, (currentData: any) => ({
+        ...currentData,
+        tasks: currentData?.tasks?.filter((t: any) => t.id !== updatedTask.id) || []
+      }), false)
+    } else {
+      // Update in place
+      mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`, (currentData: any) => ({
+        ...currentData,
+        tasks: currentData?.tasks?.map((t: any) => t.id === updatedTask.id ? updatedTask : t) || []
+      }), false)
+    }
+  }
+
+  const handleTaskDelete = (taskId: number) => {
+    mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`, (currentData: any) => ({
+      ...currentData,
+      tasks: currentData?.tasks?.filter((t: any) => t.id !== taskId) || []
+    }), false)
+  }
 
   if (isLoading) {
     return (
@@ -137,6 +173,8 @@ export function UnsortedList() {
                   task={task}
                   onSort={handleSort}
                   onAnalyze={handleAnalyze}
+                  onUpdate={handleTaskUpdate}
+                  onDelete={handleTaskDelete}
                 />
               </motion.div>
             ))}

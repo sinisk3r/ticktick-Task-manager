@@ -22,6 +22,7 @@ import { API_BASE } from "@/lib/api"
 interface QuickAddTaskModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onTaskAdded?: () => void
 }
 
 interface LLMSuggestion {
@@ -32,7 +33,7 @@ interface LLMSuggestion {
   analysis_reasoning?: string
 }
 
-export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps) {
+export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddTaskModalProps) {
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [dueDate, setDueDate] = useState<string | null>(null)
@@ -144,6 +145,9 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
       // Refresh task lists
       mutate(`${API_BASE}/api/tasks?user_id=1&status=active&limit=200`)
       mutate(`${API_BASE}/api/tasks/unsorted?user_id=1`)
+
+      // Notify parent
+      onTaskAdded?.()
 
       // Reset form
       setTitle("")
@@ -290,7 +294,7 @@ export function QuickAddTaskModal({ open, onOpenChange }: QuickAddTaskModalProps
                   <span className="text-xs text-muted-foreground">Suggested Priority:</span>
                   <Badge variant="secondary">
                     {llmSuggestion.ticktick_priority === 5 ? 'High' :
-                     llmSuggestion.ticktick_priority === 3 ? 'Medium' : 'Low'}
+                      llmSuggestion.ticktick_priority === 3 ? 'Medium' : 'Low'}
                   </Badge>
                   <span className="text-xs text-muted-foreground">(Applied automatically)</span>
                 </div>

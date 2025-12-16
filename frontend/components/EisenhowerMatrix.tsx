@@ -31,29 +31,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AlertCircle, ChevronDown, ChevronUp, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SortableCard } from "@/components/dnd/SortableCard"
+import { getQuadrant } from "@/lib/taskUtils"
 
-interface Task {
-  id: number
-  title: string
-  description?: string
-  urgency_score: number
-  importance_score: number
-  eisenhower_quadrant: string
-  effective_quadrant?: string
-  analysis_reasoning?: string
-  manual_quadrant_override?: string
-  manual_override_reason?: string
-  manual_override_at?: string
-  manual_order?: number
-  status: string
-  created_at: string
-  ticktick_task_id?: string
-}
-
-interface TasksResponse {
-  tasks: Task[]
-  total: number
-}
+import { Task, TasksResponse } from "@/types/task"
 
 interface EisenhowerMatrixProps {
   tasks?: Task[]
@@ -107,8 +87,8 @@ function TaskCardInner({ task, isOverlay, onReset }: { task: Task, isOverlay?: b
           </div>
 
           <div className="flex items-center gap-2 mt-1 pointer-events-none">
-            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">U: {task.urgency_score}</span>
-            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">I: {task.importance_score}</span>
+            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">U: {task.urgency_score ?? 0}</span>
+            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">I: {task.importance_score ?? 0}</span>
           </div>
         </div>
       </PopoverTrigger>
@@ -138,19 +118,19 @@ function TaskCardInner({ task, isOverlay, onReset }: { task: Task, isOverlay?: b
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-gray-400">Urgency</span>
                   <span className="text-xs font-semibold text-gray-300">
-                    {task.urgency_score}/10
+                    {task.urgency_score ?? 0}/10
                   </span>
                 </div>
-                <Progress value={task.urgency_score * 10} className="h-1.5" />
+                <Progress value={(task.urgency_score ?? 0) * 10} className="h-1.5" />
               </div>
               <div className="flex-1">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-gray-400">Importance</span>
                   <span className="text-xs font-semibold text-gray-300">
-                    {task.importance_score}/10
+                    {task.importance_score ?? 0}/10
                   </span>
                 </div>
-                <Progress value={task.importance_score * 10} className="h-1.5" />
+                <Progress value={(task.importance_score ?? 0) * 10} className="h-1.5" />
               </div>
             </div>
 
@@ -188,7 +168,7 @@ function TaskCardInner({ task, isOverlay, onReset }: { task: Task, isOverlay?: b
 
             <div className="flex items-center justify-between pt-2 border-t border-border">
               <span className="text-[10px] text-muted-foreground">
-                {new Date(task.created_at).toLocaleDateString()}
+                {task.created_at ? new Date(task.created_at).toLocaleDateString() : ""}
               </span>
               {task.manual_quadrant_override && (
                 <Badge variant="outline" className="text-[10px]">
@@ -300,9 +280,6 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
     })
   )
 
-  const getQuadrant = (task: Task) =>
-    task.manual_quadrant_override || task.effective_quadrant || task.eisenhower_quadrant
-
   // Helper to split tasks into buckets
   const getBuckets = (taskList: Task[]) => {
     const buckets: Record<string, Task[]> = { Q1: [], Q2: [], Q3: [], Q4: [] }
@@ -317,7 +294,9 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
         const aOrder = a.manual_order ?? 999999
         const bOrder = b.manual_order ?? 999999
         if (aOrder !== bOrder) return aOrder - bOrder
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+        return bTime - aTime
       })
     })
     return buckets
@@ -419,8 +398,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
         ? overItems.length // place at end of container
         : overItems.indexOf(over.id as number)
 
-        const isBelowOverItem = over &&
-          active.rect.current.translated &&
+      const isBelowOverItem = over &&
+        active.rect.current.translated &&
         active.rect.current.translated.top > over.rect.top + over.rect.height
 
       const modifier = isBelowOverItem ? 1 : 0

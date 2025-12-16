@@ -7,12 +7,13 @@ import { DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/api";
+import { Task } from "@/types/task";
 
 interface UnsortedTaskCardProps {
-  task: any;
+  task: Task;
   onSort: (taskId: number, quadrant: string) => void;
   onAnalyze: (taskId: number) => void;
-  onUpdate?: (task: any) => void;
+  onUpdate?: (task: Task) => void;
   onDelete?: (taskId: number) => void;
 }
 
@@ -79,9 +80,9 @@ export function UnsortedTaskCard({
             </p>
           )}
           <div className="flex gap-2 flex-wrap">
-            {task.ticktick_priority > 0 && (
+            {(task.ticktick_priority ?? 0) > 0 && (
               <Badge variant="secondary" className="text-xs">
-                Priority: {priorityLabel(task.ticktick_priority)}
+                Priority: {priorityLabel(task.ticktick_priority ?? 0)}
               </Badge>
             )}
             {task.project_name && (

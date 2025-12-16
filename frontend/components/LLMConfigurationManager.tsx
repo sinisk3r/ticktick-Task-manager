@@ -17,12 +17,12 @@ export function LLMConfigurationManager() {
   const [activeConfigId, setActiveConfigId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingConfig, setEditingConfig] = useState<LLMConfiguration | null>(null)
-  
+
   // Form states
   const [formData, setFormData] = useState<LLMConfigurationCreate>({
     name: "",
@@ -34,7 +34,7 @@ export function LLMConfigurationManager() {
     max_tokens: 1000,
     is_default: false
   })
-  
+
   // Operation states
   const [saving, setSaving] = useState(false)
   const [testingConnections, setTestingConnections] = useState<Set<number>>(new Set())
@@ -52,15 +52,15 @@ export function LLMConfigurationManager() {
     try {
       setLoading(true)
       setError(null)
-      
+
       // Load configurations and settings in parallel
       const [configsData, settingsData] = await Promise.all([
         llmConfigAPI.listConfigurations(userId),
         settingsAPI.getSettings(userId)
       ])
-      
+
       setConfigurations(configsData)
-      setActiveConfigId(settingsData.active_llm_config_id)
+      setActiveConfigId(settingsData.active_llm_config_id ?? null)
     } catch (err: any) {
       setError(err.message || 'Failed to load configurations')
     } finally {
@@ -72,12 +72,12 @@ export function LLMConfigurationManager() {
     try {
       setSaving(true)
       setError(null)
-      
+
       const newConfig = await llmConfigAPI.createConfiguration(userId, formData)
-      
+
       // Refresh the list
       await loadData()
-      
+
       // Close dialog and reset form
       setIsCreateDialogOpen(false)
       resetForm()
@@ -90,11 +90,11 @@ export function LLMConfigurationManager() {
 
   const handleEditConfig = async () => {
     if (!editingConfig) return
-    
+
     try {
       setSaving(true)
       setError(null)
-      
+
       const updateData: LLMConfigurationUpdate = {
         name: formData.name,
         provider: formData.provider,
@@ -105,12 +105,12 @@ export function LLMConfigurationManager() {
         max_tokens: formData.max_tokens,
         is_default: formData.is_default
       }
-      
+
       await llmConfigAPI.updateConfiguration(editingConfig.id, userId, updateData)
-      
+
       // Refresh the list
       await loadData()
-      
+
       // Close dialog and reset form
       setIsEditDialogOpen(false)
       setEditingConfig(null)
@@ -124,7 +124,7 @@ export function LLMConfigurationManager() {
 
   const handleDeleteConfig = async (configId: number) => {
     if (!confirm('Are you sure you want to delete this configuration?')) return
-    
+
     try {
       setError(null)
       await llmConfigAPI.deleteConfiguration(configId, userId)
@@ -137,10 +137,10 @@ export function LLMConfigurationManager() {
   const handleTestConnection = async (configId: number) => {
     try {
       setTestingConnections(prev => new Set(prev).add(configId))
-      
+
       const result = await llmConfigAPI.testConnection(configId, userId)
       setTestResults(prev => new Map(prev).set(configId, result))
-      
+
       // Refresh to get updated connection status
       await loadData()
     } catch (err: any) {
@@ -220,11 +220,11 @@ export function LLMConfigurationManager() {
   const getConnectionStatusBadge = (config: LLMConfiguration) => {
     const isActive = config.id === activeConfigId
     const isTesting = testingConnections.has(config.id)
-    
+
     if (isTesting) {
       return <Badge variant="secondary"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Testing</Badge>
     }
-    
+
     switch (config.connection_status) {
       case 'success':
         return <Badge variant="default" className="bg-green-500"><CheckCircle2 className="h-3 w-3 mr-1" />Connected</Badge>
@@ -278,9 +278,8 @@ export function LLMConfigurationManager() {
               configurations.map((config) => (
                 <div
                   key={config.id}
-                  className={`border rounded-lg p-4 space-y-3 ${
-                    config.id === activeConfigId ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200'
-                  }`}
+                  className={`border rounded-lg p-4 space-y-3 ${config.id === activeConfigId ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200'
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -316,7 +315,7 @@ export function LLMConfigurationManager() {
                       </Button>
                     </div>
                   </div>
-                  
+
                   <div className="text-sm text-muted-foreground">
                     <p><strong>Provider:</strong> {config.provider} | <strong>Model:</strong> {config.model}</p>
                     {config.base_url && <p><strong>URL:</strong> {config.base_url}</p>}
@@ -324,7 +323,7 @@ export function LLMConfigurationManager() {
                       <p className="text-red-500"><strong>Error:</strong> {config.connection_error}</p>
                     )}
                   </div>
-                  
+
                   {config.id !== activeConfigId && (
                     <Button
                       size="sm"
@@ -354,7 +353,7 @@ export function LLMConfigurationManager() {
                   Create a new AI model configuration that you can switch to later.
                 </DialogDescription>
               </DialogHeader>
-              
+
               <div className="space-y-4">
                 {/* Configuration Name */}
                 <div className="space-y-2">
@@ -492,7 +491,7 @@ export function LLMConfigurationManager() {
                   Update the configuration settings. Leave API key blank to keep the existing key.
                 </DialogDescription>
               </DialogHeader>
-              
+
               <div className="space-y-4">
                 {/* Same form fields as create dialog */}
                 <div className="space-y-2">
