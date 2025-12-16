@@ -55,7 +55,7 @@ export function ProjectSelector({ value, onChange, placeholder = "Select project
           )}
         </SelectValue>
       </SelectTrigger>
-      <SelectContent align="start">
+      <SelectContent align="start" className="z-[100]">
         <SelectItem value="none">No project</SelectItem>
         {options.map((project) => (
           <SelectItem key={project.id} value={String(project.id)}>

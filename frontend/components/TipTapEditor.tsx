@@ -4,7 +4,9 @@ import { useEditor, EditorContent, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Typography from '@tiptap/extension-typography'
 import { Markdown } from 'tiptap-markdown'
-import { Bold, Italic, List, ListOrdered, Link, Heading1, Heading2, Quote, Code, RotateCcw, RotateCw } from "lucide-react"
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import { Bold, Italic, List, ListOrdered, ListTodo, Link, Heading1, Heading2, Quote, Code, RotateCcw, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useEffect } from 'react'
@@ -20,6 +22,23 @@ declare module '@tiptap/core' {
         }
     }
 }
+
+// Custom styles for task list checkboxes
+const taskListStyles = `
+.ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding: 0;
+}
+.ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+  cursor: pointer;
+  margin-top: 0.15rem;
+}
+`
 
 interface TipTapEditorProps {
     value: string
@@ -108,6 +127,13 @@ const TipTapToolbar = ({ editor }: { editor: Editor | null }) => {
             >
                 <ListOrdered className="size-3.5" />
             </ToolbarButton>
+            <ToolbarButton
+                onClick={() => editor.chain().focus().toggleTaskList().run()}
+                isActive={editor.isActive('taskList')}
+                title="Task List (Mod-Shift-9)"
+            >
+                <ListTodo className="size-3.5" />
+            </ToolbarButton>
 
             <div className="w-px h-4 bg-border mx-1" />
 
@@ -160,9 +186,17 @@ export function TipTapEditor({ value, onChange, editable = true }: TipTapEditorP
                     keepMarks: true,
                     keepAttributes: false,
                 },
+                taskList: false,  // Disable default, use custom
             }),
             Typography,
             Markdown,
+            TaskList,
+            TaskItem.configure({
+                nested: true,
+                HTMLAttributes: {
+                    class: 'flex items-start gap-2',
+                },
+            }),
         ],
         content: value,
         editorProps: {
@@ -193,6 +227,7 @@ export function TipTapEditor({ value, onChange, editable = true }: TipTapEditorP
 
     return (
         <div className="flex flex-col h-full border rounded-md overflow-hidden bg-background">
+            <style>{taskListStyles}</style>
             <TipTapToolbar editor={editor} />
             <EditorContent editor={editor} className="flex-1 overflow-y-auto" />
         </div>

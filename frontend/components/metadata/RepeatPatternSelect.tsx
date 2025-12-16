@@ -31,7 +31,7 @@ export function RepeatPatternSelect({ value, onChange }: RepeatPatternSelectProp
       <SelectTrigger className="w-full">
         <SelectValue placeholder="Repeat" />
       </SelectTrigger>
-      <SelectContent align="start">
+      <SelectContent align="start" className="z-[100]">
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}

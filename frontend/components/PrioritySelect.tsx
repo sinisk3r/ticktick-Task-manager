@@ -29,7 +29,7 @@ export function PrioritySelect({ value, onChange, disabled }: PrioritySelectProp
           <span className={currentPriority.color}>{currentPriority.label}</span>
         </SelectValue>
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="z-[100]">
         {PRIORITIES.map((priority) => (
           <SelectItem key={priority.value} value={String(priority.value)}>
             <span className={priority.color}>{priority.label}</span>
