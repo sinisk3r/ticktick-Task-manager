@@ -18,10 +18,9 @@ from app.models.task import Task, TaskStatus, EisenhowerQuadrant
 from app.models.user import User
 from app.models.profile import Profile
 from app.models.settings import Settings
-from app.services import OllamaService
 from app.services.ticktick import ticktick_service
 from app.services.prompt_utils import build_profile_context
-from app.services.llm_ollama import OllamaService as OllamaSuggestionService
+from app.services.llm_suggestion_service import LLMSuggestionService
 from app.services.quadrant_calculator import QuadrantCalculator
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -504,36 +503,8 @@ async def enhance_task(
         "all_day": task.all_day,
     }
 
-    # Get user's active LLM configuration
-    settings_result = await db.execute(
-        select(Settings)
-        .options(selectinload(Settings.active_llm_config))
-        .where(Settings.user_id == user_id)
-    )
-    user_settings = settings_result.scalar_one_or_none()
-
-    # Determine which LLM configuration to use
-    if user_settings and user_settings.active_llm_config:
-        active_config = user_settings.active_llm_config
-        # Currently, the suggestion service only supports Ollama
-        # For non-Ollama providers, we fall back to environment defaults
-        if active_config.provider.value == "ollama":
-            suggestion_service = OllamaSuggestionService(
-                base_url=active_config.base_url,
-                model=active_config.model,
-            )
-            logger.info(f"Using user's configured Ollama: {active_config.model} at {active_config.base_url}")
-        else:
-            # For non-Ollama providers, log a warning and fall back to default
-            logger.warning(
-                f"User {user_id} has {active_config.provider.value} configured, "
-                f"but suggestion service currently only supports Ollama. Using default Ollama config."
-            )
-            suggestion_service = OllamaSuggestionService()
-    else:
-        # No user configuration, use environment defaults
-        logger.info(f"No active LLM config for user {user_id}, using environment defaults")
-        suggestion_service = OllamaSuggestionService()
+    # Use LangChain-based suggestion service for multi-provider support
+    suggestion_service = await LLMSuggestionService.for_user(user_id, db)
 
     from app.services.workload_calculator import (
         calculate_user_workload,
@@ -1008,21 +979,24 @@ async def update_task_quadrant(
         task.manual_override_at = None
 
         if quadrant_update.reanalyze and task.description:
-            ollama = OllamaService()
-            if await ollama.health_check():
+            try:
+                # Use LangChain-based service for multi-provider support
+                suggestion_service = await LLMSuggestionService.for_user(task.user_id, db)
                 profile_context = await _get_profile_context(task.user_id, db)
-                try:
-                    analysis = await ollama.analyze_task(
-                        task.description,
-                        profile_context=profile_context,
-                    )
-                    task.urgency_score = float(analysis.urgency)
-                    task.importance_score = float(analysis.importance)
-                    task.eisenhower_quadrant = EisenhowerQuadrant(analysis.quadrant)
-                    task.analysis_reasoning = analysis.reasoning
-                    task.analyzed_at = datetime.utcnow()
-                except Exception as e:
-                    print(f"[ERROR] Re-analysis failed for task {task_id}: {str(e)}")
+
+                analysis = await suggestion_service.analyze_task(
+                    task.description,
+                    profile_context=profile_context,
+                )
+                task.urgency_score = float(analysis.urgency)
+                task.importance_score = float(analysis.importance)
+                task.eisenhower_quadrant = EisenhowerQuadrant(analysis.quadrant)
+                task.analysis_reasoning = analysis.reasoning
+                task.analyzed_at = datetime.utcnow()
+            except Exception as e:
+                logger.error(f"Re-analysis failed for task {task_id}: {str(e)}")
+                # Don't fail the entire request if re-analysis fails
+                pass
     else:
         if not quadrant_update.manual_quadrant:
             raise HTTPException(
@@ -1294,7 +1268,6 @@ async def analyze_task_suggestions(
     3. Stores suggestions in TaskSuggestion table
     4. Returns analysis and suggestions for user review
     """
-    from app.services.llm_ollama import OllamaService
     from app.services.workload_calculator import (
         calculate_user_workload,
         get_project_context,
@@ -1321,8 +1294,8 @@ async def analyze_task_suggestions(
     if task.project_id:
         related_tasks = await get_related_tasks(task_id, task.project_id, db)
 
-    # Call LLM
-    llm_service = OllamaService()
+    # Use LangChain-based service for multi-provider support
+    llm_service = await LLMSuggestionService.for_user(user_id, db)
 
     task_data = {
         "title": task.title,
@@ -1733,20 +1706,14 @@ async def analyze_quick_task(
     Returns urgency/importance scores, quadrant, and suggested priority.
     """
     try:
-        ollama = OllamaService()
-
-        # Check if Ollama is available
-        if not await ollama.health_check():
-            raise HTTPException(
-                status_code=503,
-                detail="LLM service unavailable. Please try again later."
-            )
+        # Use LangChain-based service for multi-provider support
+        suggestion_service = await LLMSuggestionService.for_user(request.user_id, db)
 
         # Get user profile context for personalized analysis
         profile_context = await _get_profile_context(request.user_id, db)
 
         # Perform LLM analysis
-        analysis = await ollama.analyze_task(
+        analysis = await suggestion_service.analyze_task(
             request.description,
             profile_context=profile_context
         )
