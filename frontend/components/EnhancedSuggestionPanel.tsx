@@ -3,10 +3,9 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Card } from '@/components/ui/card'
 import { EnhancedSuggestion } from '@/types/task'
-import { Sparkles, CheckCircle2 } from 'lucide-react'
+import { Sparkles, Check, X } from 'lucide-react'
 
 interface EnhancedSuggestionPanelProps {
   suggestions: EnhancedSuggestion[]
@@ -19,41 +18,45 @@ export function EnhancedSuggestionPanel({
   onApply,
   onDismiss,
 }: EnhancedSuggestionPanelProps) {
-  const [selected, setSelected] = useState<Set<number>>(
-    // Default: Select high-confidence suggestions (≥0.85)
-    new Set(
-      suggestions
-        .map((_, idx) => idx)
-        .filter(idx => suggestions[idx].confidence >= 0.85)
-    )
-  )
+  const [accepted, setAccepted] = useState<Set<number>>(new Set())
+  const [rejected, setRejected] = useState<Set<number>>(new Set())
   const [applying, setApplying] = useState(false)
 
-  const toggleSelection = (idx: number) => {
-    const newSelected = new Set(selected)
-    if (newSelected.has(idx)) {
-      newSelected.delete(idx)
-    } else {
-      newSelected.add(idx)
-    }
-    setSelected(newSelected)
-  }
-
-  const selectAll = () => {
-    setSelected(new Set(suggestions.map((_, idx) => idx)))
-  }
-
-  const deselectAll = () => {
-    setSelected(new Set())
-  }
-
-  const handleApply = async () => {
+  const handleAccept = async (idx: number) => {
     setApplying(true)
     try {
-      const selectedSuggestions = suggestions.filter((_, idx) =>
-        selected.has(idx)
+      // Apply this single suggestion
+      await onApply([suggestions[idx]])
+      // Mark as accepted
+      const newAccepted = new Set(accepted)
+      newAccepted.add(idx)
+      setAccepted(newAccepted)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const handleReject = (idx: number) => {
+    const newRejected = new Set(rejected)
+    newRejected.add(idx)
+    setRejected(newRejected)
+  }
+
+  const handleAcceptAll = async () => {
+    setApplying(true)
+    try {
+      // Apply all remaining suggestions (not already accepted or rejected)
+      const remainingSuggestions = suggestions.filter(
+        (_, idx) => !accepted.has(idx) && !rejected.has(idx)
       )
-      await onApply(selectedSuggestions)
+      await onApply(remainingSuggestions)
+      // Mark all as accepted
+      const newAccepted = new Set(accepted)
+      remainingSuggestions.forEach((_, idx) => {
+        const originalIdx = suggestions.indexOf(suggestions.find((s) => s === remainingSuggestions[idx])!)
+        newAccepted.add(originalIdx)
+      })
+      setAccepted(newAccepted)
     } finally {
       setApplying(false)
     }
@@ -83,109 +86,131 @@ export function EnhancedSuggestionPanel({
     return acc
   }, {} as Record<string, (EnhancedSuggestion & { idx: number })[]>)
 
+  // Count remaining suggestions
+  const remainingCount = suggestions.filter(
+    (_, idx) => !accepted.has(idx) && !rejected.has(idx)
+  ).length
+
   return (
     <Card className="p-4 bg-accent/5 border-accent animate-in fade-in slide-in-from-bottom-2">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Sparkles className="size-5 text-primary" />
           <h3 className="font-semibold">
-            AI Suggestions ({suggestions.length})
+            AI Suggestions ({remainingCount} remaining)
           </h3>
         </div>
         <div className="flex gap-2">
           <Button
-            variant="ghost"
+            variant="default"
             size="sm"
-            onClick={selectAll}
-            className="text-xs"
+            onClick={handleAcceptAll}
+            disabled={applying || remainingCount === 0}
+            className="text-xs gap-1"
           >
-            Select All
+            <Check className="size-3" />
+            Accept All
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={deselectAll}
+            onClick={onDismiss}
+            disabled={applying}
             className="text-xs"
           >
-            Clear
+            Dismiss
           </Button>
         </div>
       </div>
 
-      <div className="space-y-4 max-h-[400px] overflow-y-auto">
+      <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
         {Object.entries(groupedSuggestions).map(([fieldType, items]) => (
           <div key={fieldType} className="space-y-2">
             <h4 className="text-sm font-medium text-muted-foreground capitalize">
               {fieldType.replace(/_/g, ' ')} {items.length > 1 && `(${items.length} options)`}
             </h4>
 
-            {items.map((suggestion) => (
-              <div
-                key={suggestion.idx}
-                className={`p-3 rounded-lg border transition-colors cursor-pointer ${
-                  selected.has(suggestion.idx)
-                    ? 'bg-primary/10 border-primary'
-                    : 'bg-card hover:bg-accent/5'
-                }`}
-                onClick={() => toggleSelection(suggestion.idx)}
-              >
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    checked={selected.has(suggestion.idx)}
-                    onCheckedChange={() => toggleSelection(suggestion.idx)}
-                    className="mt-1"
-                  />
+            {items.map((suggestion) => {
+              const isAccepted = accepted.has(suggestion.idx)
+              const isRejected = rejected.has(suggestion.idx)
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      {getConfidenceBadge(suggestion.confidence, suggestion.priority)}
-                      {suggestion.priority === 'high' && (
-                        <CheckCircle2 className="size-3 text-green-600" />
-                      )}
+              return (
+                <div
+                  key={suggestion.idx}
+                  className={`p-3 rounded-lg border transition-all ${
+                    isAccepted
+                      ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800 opacity-60'
+                      : isRejected
+                      ? 'bg-muted/50 border-muted opacity-50'
+                      : 'bg-card hover:bg-accent/5 border-border'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {getConfidenceBadge(suggestion.confidence, suggestion.priority)}
+                      </div>
+
+                      <div className="text-sm mb-2">
+                        {suggestion.current_display && (
+                          <>
+                            <span className="text-muted-foreground">Current: </span>
+                            <span className="line-through">{suggestion.current_display}</span>
+                            <span className="mx-2">→</span>
+                          </>
+                        )}
+                        <span className={`font-medium ${isAccepted ? 'text-green-700 dark:text-green-400' : 'text-primary'}`}>
+                          {suggestion.suggested_display}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-muted-foreground italic">
+                        {suggestion.reason}
+                      </p>
                     </div>
 
-                    <div className="text-sm mb-2">
-                      {suggestion.current_display && (
+                    <div className="flex gap-1 shrink-0">
+                      {isAccepted ? (
+                        <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400 font-medium">
+                          <Check className="size-4" />
+                          Applied
+                        </div>
+                      ) : isRejected ? (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <X className="size-4" />
+                          Skipped
+                        </div>
+                      ) : (
                         <>
-                          <span className="text-muted-foreground">Current: </span>
-                          <span className="line-through">{suggestion.current_display}</span>
-                          <span className="mx-2">→</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleAccept(suggestion.idx)}
+                            disabled={applying}
+                            className="h-8 w-8 p-0 hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-950"
+                            title="Accept this suggestion"
+                          >
+                            <Check className="size-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleReject(suggestion.idx)}
+                            disabled={applying}
+                            className="h-8 w-8 p-0 hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950"
+                            title="Reject this suggestion"
+                          >
+                            <X className="size-4" />
+                          </Button>
                         </>
                       )}
-                      <span className="font-medium text-primary">
-                        {suggestion.suggested_display}
-                      </span>
                     </div>
-
-                    <p className="text-xs text-muted-foreground italic">
-                      {suggestion.reason}
-                    </p>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ))}
-      </div>
-
-      <div className="flex gap-2 mt-4 pt-3 border-t">
-        <Button
-          onClick={handleApply}
-          disabled={applying || selected.size === 0}
-          className="flex-1 gap-2"
-        >
-          <Sparkles className="size-4" />
-          {applying
-            ? 'Applying...'
-            : `Apply ${selected.size} suggestion${selected.size !== 1 ? 's' : ''}`}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={onDismiss}
-          disabled={applying}
-        >
-          Dismiss
-        </Button>
       </div>
     </Card>
   )
