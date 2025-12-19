@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, delete
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 import logging
 
@@ -16,6 +17,7 @@ from app.core.database import get_db
 from app.models.task import Task, TaskStatus, EisenhowerQuadrant
 from app.models.user import User
 from app.models.profile import Profile
+from app.models.settings import Settings
 from app.services import OllamaService
 from app.services.ticktick import ticktick_service
 from app.services.prompt_utils import build_profile_context
@@ -502,7 +504,36 @@ async def enhance_task(
         "all_day": task.all_day,
     }
 
-    suggestion_service = OllamaSuggestionService()
+    # Get user's active LLM configuration
+    settings_result = await db.execute(
+        select(Settings)
+        .options(selectinload(Settings.active_llm_config))
+        .where(Settings.user_id == user_id)
+    )
+    user_settings = settings_result.scalar_one_or_none()
+
+    # Determine which LLM configuration to use
+    if user_settings and user_settings.active_llm_config:
+        active_config = user_settings.active_llm_config
+        # Currently, the suggestion service only supports Ollama
+        # For non-Ollama providers, we fall back to environment defaults
+        if active_config.provider.value == "ollama":
+            suggestion_service = OllamaSuggestionService(
+                base_url=active_config.base_url,
+                model=active_config.model,
+            )
+            logger.info(f"Using user's configured Ollama: {active_config.model} at {active_config.base_url}")
+        else:
+            # For non-Ollama providers, log a warning and fall back to default
+            logger.warning(
+                f"User {user_id} has {active_config.provider.value} configured, "
+                f"but suggestion service currently only supports Ollama. Using default Ollama config."
+            )
+            suggestion_service = OllamaSuggestionService()
+    else:
+        # No user configuration, use environment defaults
+        logger.info(f"No active LLM config for user {user_id}, using environment defaults")
+        suggestion_service = OllamaSuggestionService()
 
     from app.services.workload_calculator import (
         calculate_user_workload,
