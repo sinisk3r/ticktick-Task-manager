@@ -7,6 +7,7 @@ implementation using LangChain. Supports all providers: Ollama, Claude, GPT-4, O
 
 import json
 import logging
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any, AsyncGenerator
 from pydantic import BaseModel
@@ -18,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.llm_factory import get_llm_for_user
 
 logger = logging.getLogger(__name__)
+
+# Timeout for LLM calls (60 seconds)
+LLM_TIMEOUT_SECONDS = 60
 
 
 class TaskAnalysis(BaseModel):
@@ -109,9 +113,17 @@ Return strictly valid JSON in this shape:
                 HumanMessage(content=user_message),
             ]
 
-            response = await self.llm.ainvoke(messages)
-            llm_text = response.content
+            logger.info(f"Calling LLM for task analysis (timeout: {LLM_TIMEOUT_SECONDS}s)")
+            try:
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages),
+                    timeout=LLM_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"LLM call timed out after {LLM_TIMEOUT_SECONDS} seconds")
+                raise TimeoutError(f"LLM analysis timed out after {LLM_TIMEOUT_SECONDS} seconds. The AI service may be slow or unavailable.")
 
+            llm_text = response.content
             logger.debug(f"LLM response for task analysis: {llm_text[:200]}")
 
             # Parse JSON response
@@ -226,11 +238,18 @@ Return strictly valid JSON in this shape:
                 HumanMessage(content=final_prompt)
             ]
 
-            logger.debug(f"Generating suggestions with {self.llm.__class__.__name__}")
+            logger.info(f"Calling {self.llm.__class__.__name__} for suggestions (timeout: {LLM_TIMEOUT_SECONDS}s)")
 
-            response = await self.llm.ainvoke(messages)
+            try:
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages),
+                    timeout=LLM_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"LLM call timed out after {LLM_TIMEOUT_SECONDS} seconds")
+                raise TimeoutError(f"LLM suggestion generation timed out after {LLM_TIMEOUT_SECONDS} seconds. The AI service may be slow or unavailable.")
+
             llm_text = response.content
-
             logger.debug(f"LLM response (first 500 chars): {llm_text[:500]}")
 
             # Parse JSON response
