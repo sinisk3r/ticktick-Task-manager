@@ -77,3 +77,4 @@ class LLMConfiguration(Base):
         """Check if this provider requires a base URL."""
         return self.provider == LLMProvider.OLLAMA
 
+
