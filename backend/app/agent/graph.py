@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm_factory import get_llm, get_llm_for_user
 from app.agent.tools import (
+    # Core task tools
     fetch_tasks,
     fetch_task,
     create_task,
@@ -46,6 +47,12 @@ from app.agent.tools import (
     complete_task,
     delete_task,
     quick_analyze_task,
+    # V1 MVP + Phase 2 tools
+    detect_stale_tasks,
+    breakdown_task,
+    draft_email,
+    get_workload_analytics,
+    get_rest_recommendation,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,11 @@ Today is {current_date} at {current_time}.
 - User wants to list/show/view tasks → use `fetch_tasks`
 - User asks about a specific task → use `fetch_task`
 - User wants analysis on a task description → use `quick_analyze_task`
+- User asks "What have I been avoiding?" or about stale/forgotten tasks → use `detect_stale_tasks`
+- User wants to break down a complex task into subtasks → use `breakdown_task`
+- User wants to draft an email about a task → use `draft_email`
+- User asks "How busy am I?" or about workload/capacity → use `get_workload_analytics`
+- User feels overwhelmed or asks about taking a break → use `get_rest_recommendation`
 
 **Response style:**
 - Keep responses concise (1-3 sentences) unless more detail is needed
@@ -194,6 +206,7 @@ async def create_agent(
     # Note: user_id and db will be injected at runtime via RunnableConfig
     # The @tool decorator with InjectedToolArg ensures these params are hidden from LLM
     tools_list = [
+        # Core task tools
         fetch_tasks,
         fetch_task,
         create_task,
@@ -201,6 +214,12 @@ async def create_agent(
         complete_task,
         delete_task,
         quick_analyze_task,
+        # V1 MVP + Phase 2 tools
+        detect_stale_tasks,
+        breakdown_task,
+        draft_email,
+        get_workload_analytics,
+        get_rest_recommendation,
     ]
 
     logger.info(

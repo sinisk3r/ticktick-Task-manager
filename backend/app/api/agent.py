@@ -212,6 +212,7 @@ async def execute_tool(payload: ExecuteRequest, db: AsyncSession = Depends(get_d
 
     # Get tool by name from agent_tools module
     tool_map = {
+        # Core task tools
         "fetch_tasks": agent_tools.fetch_tasks,
         "fetch_task": agent_tools.fetch_task,
         "create_task": agent_tools.create_task,
@@ -219,6 +220,12 @@ async def execute_tool(payload: ExecuteRequest, db: AsyncSession = Depends(get_d
         "complete_task": agent_tools.complete_task,
         "delete_task": agent_tools.delete_task,
         "quick_analyze_task": agent_tools.quick_analyze_task,
+        # V1 MVP + Phase 2 tools
+        "detect_stale_tasks": agent_tools.detect_stale_tasks,
+        "breakdown_task": agent_tools.breakdown_task,
+        "draft_email": agent_tools.draft_email,
+        "get_workload_analytics": agent_tools.get_workload_analytics,
+        "get_rest_recommendation": agent_tools.get_rest_recommendation,
     }
 
     if payload.tool not in tool_map:

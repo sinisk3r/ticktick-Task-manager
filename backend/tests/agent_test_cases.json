@@ -191,5 +191,105 @@
       "should_succeed": false,
       "comment": "Will likely fail without task ID but should attempt"
     }
+  },
+  {
+    "name": "Tool Call: Detect Stale Tasks",
+    "query": "What tasks have I been avoiding?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "detect_stale_tasks",
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should detect tasks not updated in 14+ days"
+    }
+  },
+  {
+    "name": "Tool Call: Detect Stale Tasks Alt",
+    "query": "Show me my forgotten or stale tasks",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "detect_stale_tasks",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: Breakdown Task",
+    "query": "Help me break down the quarterly review task",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "breakdown_task",
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should decompose into actionable subtasks"
+    }
+  },
+  {
+    "name": "Tool Call: Breakdown Task with Description",
+    "query": "Break this down into smaller steps: Plan and execute company offsite",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "breakdown_task",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: Draft Email",
+    "query": "Draft an email to my manager about task 5",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "draft_email",
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should generate professional email with subject and body"
+    }
+  },
+  {
+    "name": "Tool Call: Draft Email Status Update",
+    "query": "Write a status update email for task 3",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "draft_email",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: Workload Analytics",
+    "query": "How busy am I this week?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "get_workload_analytics",
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should show capacity utilization and risk level"
+    }
+  },
+  {
+    "name": "Tool Call: Workload Analytics Alt",
+    "query": "What's my current workload capacity?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "get_workload_analytics",
+      "should_succeed": true
+    }
+  },
+  {
+    "name": "Tool Call: Rest Recommendation",
+    "query": "I'm feeling overwhelmed, should I take a break?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "get_rest_recommendation",
+      "should_succeed": true,
+      "no_truncation": true,
+      "comment": "Should analyze work intensity and suggest rest if needed"
+    }
+  },
+  {
+    "name": "Tool Call: Rest Recommendation Alt",
+    "query": "Do I need a rest break?",
+    "expected": {
+      "should_call_tools": true,
+      "expected_tool": "get_rest_recommendation",
+      "should_succeed": true
+    }
   }
 ]
