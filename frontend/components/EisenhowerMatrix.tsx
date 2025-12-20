@@ -23,30 +23,40 @@ import {
 } from "@dnd-kit/sortable"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Progress } from "@/components/ui/progress"
 import { api } from "@/lib/api"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, ChevronDown, ChevronUp, RotateCcw } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { AlertCircle } from "lucide-react"
 import { SortableCard } from "@/components/dnd/SortableCard"
 import { getQuadrant } from "@/lib/taskUtils"
+import { toast } from "sonner"
+import { UnsortedItemsSection } from "@/components/UnsortedItemsSection"
+import { TaskDetailPopover } from "@/components/TaskDetailPopover"
 
 import { Task, TasksResponse } from "@/types/task"
 
 interface EisenhowerMatrixProps {
   tasks?: Task[]
-  onTasksUpdate?: (tasks: Task[]) => void
+  onTasksUpdate?: () => void | Promise<void>
   refresh?: () => Promise<void>
 }
 
 // --- Components ---
 
-function SortableTask({ task, isActiveOverlay, onReset }: { task: Task, isActiveOverlay?: boolean, onReset?: () => void }) {
+function SortableTask({
+  task,
+  isActiveOverlay,
+  onUpdate,
+  onDelete
+}: {
+  task: Task
+  isActiveOverlay?: boolean
+  onUpdate?: (task: Task) => void
+  onDelete?: (taskId: number) => void
+}) {
   // If this is the overlay, render without sortable wrappers
   if (isActiveOverlay) {
-    return <TaskCardInner task={task} isOverlay onReset={onReset} />
+    return <TaskCardInner task={task} isOverlay />
   }
 
   return (
@@ -56,149 +66,65 @@ function SortableTask({ task, isActiveOverlay, onReset }: { task: Task, isActive
       className="mb-2 touch-none"
       draggingClassName="opacity-30"
     >
-      {() => <TaskCardInner task={task} onReset={onReset} />}
+      {() => <TaskCardInner task={task} onUpdate={onUpdate} onDelete={onDelete} />}
     </SortableCard>
   )
 }
 
-function TaskCardInner({ task, isOverlay, onReset }: { task: Task, isOverlay?: boolean, onReset?: () => void }) {
-  const [expanded, setExpanded] = useState(false)
+function TaskCardInner({
+  task,
+  isOverlay,
+  onUpdate,
+  onDelete
+}: {
+  task: Task
+  isOverlay?: boolean
+  onUpdate?: (task: Task) => void
+  onDelete?: (taskId: number) => void
+}) {
+  // If this is the drag overlay, render simple display only
+  if (isOverlay) {
+    return (
+      <div className="w-full text-left p-3 rounded-lg bg-card border shadow-lg">
+        <div className="text-sm font-medium mb-1">{task.title}</div>
+      </div>
+    )
+  }
 
-  const truncatedReasoning = task.analysis_reasoning
-    ? task.analysis_reasoning.length > 120
-      ? task.analysis_reasoning.substring(0, 120) + "..."
-      : task.analysis_reasoning
-    : "No AI analysis available"
-
+  // Normal task card with TaskDetailPopover
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <div
-          className={`
-                        w-full text-left p-3 rounded-lg bg-background border border-border 
-                        transition-all cursor-grab active:cursor-grabbing
-                        ${isOverlay ? 'shadow-xl scale-105 border-primary ring-1 ring-primary' : 'hover:bg-accent/50 shadow-sm'}
-                    `}
-        >
-          <div className="flex justify-between items-start pointer-events-none">
-            <p className="text-sm font-medium text-foreground truncate pr-2">
-              {task.title}
+    <TaskDetailPopover
+      task={task}
+      onUpdate={(updatedTask) => {
+        onUpdate?.(updatedTask)
+      }}
+      onDelete={(taskId) => {
+        onDelete?.(taskId)
+      }}
+      trigger={
+        <div className="w-full text-left p-3 rounded-lg bg-card border hover:bg-accent/50 transition-colors cursor-pointer">
+          <div className="text-sm font-medium mb-1">{task.title}</div>
+          {task.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2">
+              {task.description}
             </p>
-          </div>
-
-          <div className="flex items-center gap-2 mt-1 pointer-events-none">
-            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">U: {task.urgency_score ?? 0}</span>
-            <span className="text-xs text-muted-foreground bg-secondary/50 px-1 rounded">I: {task.importance_score ?? 0}</span>
+          )}
+          {/* Quadrant badge */}
+          <div className="mt-2 flex gap-1">
+            {getQuadrant(task) && (
+              <Badge variant="outline" className="text-xs">
+                {getQuadrant(task)}
+              </Badge>
+            )}
+            {task.manual_quadrant_override && (
+              <Badge variant="secondary" className="text-xs">
+                Manual
+              </Badge>
+            )}
           </div>
         </div>
-      </PopoverTrigger>
-
-      {/* 
-               We disable the popover content while purely acting as an overlay OR while dragging 
-               But SortableTask logic handles dragging. `isOverlay` is true when it's the "ghost" following mouse.
-               We usually don't want the popover to open on the overlay.
-            */}
-      {!isOverlay && (
-        <PopoverContent className="w-96 bg-popover border-border" side="right">
-          <div className="space-y-3">
-            <h4 className="font-semibold text-gray-100 leading-tight">
-              {task.title}
-            </h4>
-
-            {task.description && (
-              <p className="text-sm text-gray-300">
-                {task.description.length > 150
-                  ? task.description.substring(0, 150) + "..."
-                  : task.description}
-              </p>
-            )}
-
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-gray-400">Urgency</span>
-                  <span className="text-xs font-semibold text-gray-300">
-                    {task.urgency_score ?? 0}/10
-                  </span>
-                </div>
-                <Progress value={(task.urgency_score ?? 0) * 10} className="h-1.5" />
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-gray-400">Importance</span>
-                  <span className="text-xs font-semibold text-gray-300">
-                    {task.importance_score ?? 0}/10
-                  </span>
-                </div>
-                <Progress value={(task.importance_score ?? 0) * 10} className="h-1.5" />
-              </div>
-            </div>
-
-            <div className="border-t border-border pt-3 mt-2">
-              <div className="flex items-start gap-2">
-                <span className="text-base">💡</span>
-                <div className="flex-1">
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {expanded ? task.analysis_reasoning : truncatedReasoning}
-                  </p>
-                </div>
-              </div>
-
-              {task.analysis_reasoning && task.analysis_reasoning.length > 120 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setExpanded(!expanded)}
-                  className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground h-6"
-                >
-                  {expanded ? (
-                    <>
-                      <ChevronUp className="h-3 w-3 mr-1" />
-                      Show less
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="h-3 w-3 mr-1" />
-                      Read more
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between pt-2 border-t border-border">
-              <span className="text-[10px] text-muted-foreground">
-                {task.created_at ? new Date(task.created_at).toLocaleDateString() : ""}
-              </span>
-              {task.manual_quadrant_override && (
-                <Badge variant="outline" className="text-[10px]">
-                  Manual override
-                </Badge>
-              )}
-            </div>
-
-            {task.manual_quadrant_override && (
-              <div className="mt-3 flex items-center justify-between border-t border-gray-700 pt-3">
-                <div className="text-xs text-gray-400">
-                  Override: {task.manual_quadrant_override}
-                </div>
-                {onReset && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-gray-300 hover:text-gray-50"
-                    onClick={onReset}
-                  >
-                    <RotateCcw className="h-3 w-3 mr-1" />
-                    Reset
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        </PopoverContent>
-      )}
-    </Popover>
+      }
+    />
   )
 }
 
@@ -211,6 +137,8 @@ const QuadrantCard = ({
   icon,
   quadrantId,
   onResetTask,
+  onUpdateTask,
+  onDeleteTask,
 }: {
   title: string
   description: string
@@ -220,6 +148,8 @@ const QuadrantCard = ({
   icon: string
   quadrantId: string
   onResetTask?: (taskId: number) => void
+  onUpdateTask?: (task: Task) => void
+  onDeleteTask?: (taskId: number) => void
 }) => {
   return (
     <Card
@@ -251,7 +181,8 @@ const QuadrantCard = ({
               <SortableTask
                 key={task.id}
                 task={task}
-                onReset={onResetTask ? () => onResetTask(task.id) : undefined}
+                onUpdate={onUpdateTask}
+                onDelete={onDeleteTask}
               />
             ))
           )}
@@ -269,6 +200,13 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
   const [activeId, setActiveId] = useState<number | null>(null)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null)
+  const [savingDrag, setSavingDrag] = useState(false)
+
+  // Ref to prevent race conditions from rapid successive drags
+  const dragLockRef = useRef(false)
+
+  // Track the original container when drag starts (before handleDragOver modifies state)
+  const originalContainerRef = useRef<string | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -370,6 +308,9 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
     const { active } = event
     setActiveId(active.id as number)
     setActiveTask(tasksState.find(t => t.id === active.id) || null)
+
+    // Store the original container before handleDragOver modifies state
+    originalContainerRef.current = findContainer(active.id as number) || null
   }
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -421,71 +362,109 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
   }
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event
-    const id = active.id as number
+    // Prevent race conditions from rapid successive drags
+    if (dragLockRef.current) return
 
-    // Cleanup active state
-    setActiveId(null)
-    setActiveTask(null)
+    dragLockRef.current = true
 
-    if (!over) return;
+    try {
+      const { active, over } = event
+      const id = active.id as number
 
-    const currentQuadrants = quadrantIdsRef.current
-    const activeContainer = findContainer(active.id as number)
-    const overContainer = (Object.keys(currentQuadrants).includes(over.id as string))
-      ? over.id as string
-      : findContainer(over.id as number)
+      // Cleanup active state
+      setActiveId(null)
+      setActiveTask(null)
 
-    if (activeContainer && overContainer) {
-      // Calculate final index in the destination using the latest state
-      const overIndex = currentQuadrants[overContainer].indexOf(over.id as number)
-      const activeIndex = currentQuadrants[activeContainer].indexOf(active.id as number)
-
-      if (activeContainer === overContainer) {
-        if (activeIndex !== overIndex) {
-          const newOrder = arrayMove(currentQuadrants[activeContainer], activeIndex, overIndex)
-          setQuadrantIds(prev => ({
-            ...prev,
-            [activeContainer]: newOrder
-          }))
-          // Persist Order
-          await persistReorder(activeContainer, newOrder)
-        }
-      } else {
-        // Moved between containers 
-        // 1. Update task metadata (quadrant)
-        await persistQuadrantChange(id, overContainer)
-
-        // 2. Persist order of destination container
-        // The state `quadrantIds` is already updated by `handleDragOver`.
-        const newOrder = quadrantIds[overContainer]
-        await persistReorder(overContainer, newOrder)
+      if (!over) {
+        originalContainerRef.current = null
+        return
       }
+
+      const currentQuadrants = quadrantIdsRef.current
+
+      // Use the original container from when drag started (before handleDragOver modified state)
+      const activeContainer = originalContainerRef.current
+
+      // Determine the target container
+      const overContainer = (Object.keys(currentQuadrants).includes(over.id as string))
+        ? over.id as string
+        : findContainer(over.id as number)
+
+      console.log("Drag end:", { activeContainer, overContainer, taskId: id })
+
+      if (activeContainer && overContainer) {
+        // Calculate final index in the destination using the latest state
+        const overIndex = currentQuadrants[overContainer].indexOf(over.id as number)
+        const activeIndex = currentQuadrants[activeContainer].indexOf(active.id as number)
+
+        if (activeContainer === overContainer) {
+          // Same quadrant: only reorder
+          if (activeIndex !== overIndex) {
+            const newOrder = arrayMove(currentQuadrants[activeContainer], activeIndex, overIndex)
+            setQuadrantIds(prev => ({
+              ...prev,
+              [activeContainer]: newOrder
+            }))
+            // Persist Order
+            await persistReorder(activeContainer, newOrder)
+          }
+        } else {
+          // Cross-quadrant move
+          setSavingDrag(true)
+
+          try {
+            console.log(`Moving task ${id} from ${activeContainer} to ${overContainer}`)
+
+            // 1. Update quadrant (backend auto-assigns manual_order to end)
+            const response = await api.patch(`/api/tasks/${id}/quadrant`, {
+              manual_quadrant: overContainer,
+              reason: "Moved in matrix view",
+              source: "matrix"
+            })
+
+            console.log("Quadrant update response:", response)
+
+            // 2. Refresh from server to get updated task state
+            if (controlled && onTasksUpdate) {
+              await onTasksUpdate() // Trigger parent refresh in controlled mode
+            } else {
+              await fetchTasks() // Fetch tasks in uncontrolled mode
+            }
+
+            toast.success(`Task moved to ${overContainer}`)
+          } catch (err: any) {
+            console.error("Failed to move task:", {
+              error: err,
+              message: err?.message,
+              data: err?.data,
+              taskId: id,
+              from: activeContainer,
+              to: overContainer
+            })
+
+            // Rollback: restore quadrantIds from current tasksState
+            const buckets = getBuckets(tasksState)
+            setQuadrantIds({
+              Q1: buckets.Q1.map(t => t.id),
+              Q2: buckets.Q2.map(t => t.id),
+              Q3: buckets.Q3.map(t => t.id),
+              Q4: buckets.Q4.map(t => t.id),
+            })
+
+            toast.error(err?.message || "Failed to move task. Changes reverted.")
+          } finally {
+            setSavingDrag(false)
+          }
+        }
+      }
+    } finally {
+      dragLockRef.current = false
+      originalContainerRef.current = null
     }
   }
 
   const findContainer = (id: number) => {
     return Object.keys(quadrantIds).find(key => quadrantIds[key].includes(id));
-  }
-
-  const persistQuadrantChange = async (taskId: number, newQuadrant: string) => {
-    try {
-      // Optimistic task update
-      setTasksState(prev => prev.map(t => {
-        if (t.id === taskId) {
-          return { ...t, manual_quadrant_override: newQuadrant, manual_override_reason: "Moved in matrix" }
-        }
-        return t
-      }))
-
-      await api.patch(`/api/tasks/${taskId}/quadrant`, {
-        manual_quadrant: newQuadrant,
-        reason: "Moved in matrix view",
-        source: "matrix"
-      })
-    } catch (err) {
-      console.error("Failed to update quadrant", err)
-    }
   }
 
   const persistReorder = async (quadrant: string, orderedIds: number[]) => {
@@ -506,8 +485,15 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
         quadrant,
         task_ids: orderedIds,
       })
-    } catch (err) {
-      console.error("Reorder failed", err)
+    } catch (err: any) {
+      console.error("Reorder failed:", {
+        error: err,
+        message: err?.message || 'Unknown error',
+        quadrant,
+        taskCount: orderedIds.length
+      })
+      // Don't show error toast for reorder within same quadrant - it's not critical
+      // The optimistic update already happened, and next fetch will correct any inconsistencies
     }
   }
 
@@ -520,12 +506,36 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
       })
       // Updates state
       setTasksState(prev => prev.map(t => t.id === taskId ? updated : t))
-      if (onTasksUpdate) onTasksUpdate(tasksState.map(t => t.id === taskId ? updated : t))
+      if (onTasksUpdate) onTasksUpdate()
     } catch (err: any) {
       setError(err.message || "Failed to reset override")
     } finally {
       setSavingTaskId(null)
     }
+  }
+
+  const handleUpdateTask = (updatedTask: Task) => {
+    setTasksState(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t))
+    if (onTasksUpdate) onTasksUpdate()
+  }
+
+  const handleDeleteTask = (taskId: number) => {
+    setTasksState(prev => prev.filter(t => t.id !== taskId))
+    // Also remove from quadrantIds
+    setQuadrantIds(prev => {
+      const findContainer = (id: number) => {
+        return Object.keys(prev).find(key => prev[key].includes(id))
+      }
+      const quadrant = findContainer(taskId)
+      if (quadrant) {
+        return {
+          ...prev,
+          [quadrant]: prev[quadrant].filter(id => id !== taskId)
+        }
+      }
+      return prev
+    })
+    if (onTasksUpdate) onTasksUpdate()
   }
 
   const dropAnimation: DropAnimation = {
@@ -590,6 +600,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             icon="🔴"
             quadrantId="Q1"
             onResetTask={handleReset}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
           />
 
           <QuadrantCard
@@ -601,6 +613,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             icon="🟢"
             quadrantId="Q2"
             onResetTask={handleReset}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
           />
 
           <QuadrantCard
@@ -612,6 +626,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             icon="🟡"
             quadrantId="Q3"
             onResetTask={handleReset}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
           />
 
           <QuadrantCard
@@ -623,6 +639,8 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             icon="🔵"
             quadrantId="Q4"
             onResetTask={handleReset}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
           />
         </div>
 
@@ -630,6 +648,20 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
           {activeTask ? <SortableTask task={activeTask} isActiveOverlay /> : null}
         </DragOverlay>
       </DndContext>
+
+      {/* Unsorted Items Section */}
+      <UnsortedItemsSection
+        activeId={activeId}
+        onTaskSorted={(taskId, quadrant) => {
+          // Refresh matrix tasks to show newly assigned item
+          if (controlled && onTasksUpdate) {
+            onTasksUpdate() // Trigger parent refresh in controlled mode
+          } else {
+            fetchTasks() // Fetch tasks in uncontrolled mode
+          }
+        }}
+        onRefresh={controlled && onTasksUpdate ? onTasksUpdate : fetchTasks}
+      />
 
       {savingTaskId && (
         <div className="text-xs text-gray-400 fixed bottom-4 right-4 bg-background border border-border p-2 rounded shadow">
