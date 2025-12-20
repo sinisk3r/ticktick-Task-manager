@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.models.llm_configuration import LLMConfiguration, LLMProvider
+from app.core.llm_config import get_llm_settings
 
 # SSL verification setting for cloud LLM APIs
 # NOTE: Temporarily disabled due to macOS SSL certificate issues
@@ -23,6 +24,27 @@ class ConnectionTestResult(BaseModel):
     error: Optional[str] = None
     response_time_ms: Optional[int] = None
     model_info: Optional[Dict[str, Any]] = None
+
+
+def _get_effective_api_key(config: LLMConfiguration) -> Optional[str]:
+    """
+    Get the effective API key for a configuration.
+
+    Falls back to environment variable if config doesn't have an API key stored.
+    """
+    if config.api_key:
+        return config.api_key
+
+    # Fall back to environment variable
+    env_settings = get_llm_settings()
+    provider_env_keys = {
+        LLMProvider.GEMINI: env_settings.gemini_api_key,
+        LLMProvider.OPENAI: env_settings.openai_api_key,
+        LLMProvider.ANTHROPIC: env_settings.anthropic_api_key,
+        LLMProvider.OPENROUTER: env_settings.openrouter_api_key,
+        LLMProvider.OLLAMA: None,
+    }
+    return provider_env_keys.get(config.provider)
 
 
 async def test_llm_connection(config: LLMConfiguration) -> ConnectionTestResult:
@@ -42,6 +64,8 @@ async def test_llm_connection(config: LLMConfiguration) -> ConnectionTestResult:
             return await _test_anthropic_connection(config, start_time)
         elif config.provider == LLMProvider.OPENAI:
             return await _test_openai_connection(config, start_time)
+        elif config.provider == LLMProvider.GEMINI:
+            return await _test_gemini_connection(config, start_time)
         else:
             return ConnectionTestResult(
                 success=False,
@@ -137,12 +161,13 @@ async def _test_ollama_connection(config: LLMConfiguration, start_time: float) -
 
 async def _test_openrouter_connection(config: LLMConfiguration, start_time: float) -> ConnectionTestResult:
     """Test OpenRouter connection."""
-    if not config.api_key:
+    api_key = _get_effective_api_key(config)
+    if not api_key:
         return ConnectionTestResult(
             success=False,
-            error="API key is required for OpenRouter"
+            error="API key is required for OpenRouter (set OPENROUTER_API_KEY in .env or provide in config)"
         )
-    
+
     async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
@@ -151,9 +176,9 @@ async def _test_openrouter_connection(config: LLMConfiguration, start_time: floa
                 "max_tokens": 10,
                 "temperature": config.temperature
             }
-            
+
             headers = {
-                "Authorization": f"Bearer {config.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             }
             
@@ -204,12 +229,13 @@ async def _test_openrouter_connection(config: LLMConfiguration, start_time: floa
 
 async def _test_anthropic_connection(config: LLMConfiguration, start_time: float) -> ConnectionTestResult:
     """Test Anthropic Claude connection."""
-    if not config.api_key:
+    api_key = _get_effective_api_key(config)
+    if not api_key:
         return ConnectionTestResult(
             success=False,
-            error="API key is required for Anthropic Claude"
+            error="API key is required for Anthropic Claude (set ANTHROPIC_API_KEY in .env or provide in config)"
         )
-    
+
     async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
@@ -218,9 +244,9 @@ async def _test_anthropic_connection(config: LLMConfiguration, start_time: float
                 "temperature": config.temperature,
                 "messages": [{"role": "user", "content": "Hello"}]
             }
-            
+
             headers = {
-                "x-api-key": config.api_key,
+                "x-api-key": api_key,
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01"
             }
@@ -272,12 +298,13 @@ async def _test_anthropic_connection(config: LLMConfiguration, start_time: float
 
 async def _test_openai_connection(config: LLMConfiguration, start_time: float) -> ConnectionTestResult:
     """Test OpenAI connection."""
-    if not config.api_key:
+    api_key = _get_effective_api_key(config)
+    if not api_key:
         return ConnectionTestResult(
             success=False,
-            error="API key is required for OpenAI"
+            error="API key is required for OpenAI (set OPENAI_API_KEY in .env or provide in config)"
         )
-    
+
     async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
         try:
             test_payload = {
@@ -286,22 +313,22 @@ async def _test_openai_connection(config: LLMConfiguration, start_time: float) -
                 "max_tokens": 10,
                 "temperature": config.temperature
             }
-            
+
             headers = {
-                "Authorization": f"Bearer {config.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             }
-            
+
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 json=test_payload,
                 headers=headers
             )
             response.raise_for_status()
-            
+
             response_time = int((time.time() - start_time) * 1000)
             result_data = response.json()
-            
+
             return ConnectionTestResult(
                 success=True,
                 response_time_ms=response_time,
@@ -311,23 +338,91 @@ async def _test_openai_connection(config: LLMConfiguration, start_time: float) -
                     "response_length": len(result_data.get("choices", [{}])[0].get("message", {}).get("content", ""))
                 }
             )
-            
+
         except httpx.HTTPStatusError as e:
             response_time = int((time.time() - start_time) * 1000)
             error_detail = "Unknown error"
-            
+
             try:
                 error_data = e.response.json()
                 error_detail = error_data.get("error", {}).get("message", str(e))
             except:
                 error_detail = str(e)
-            
+
             return ConnectionTestResult(
                 success=False,
                 error=f"OpenAI API error: {error_detail}",
                 response_time_ms=response_time
             )
-        
+
+        except Exception as e:
+            response_time = int((time.time() - start_time) * 1000)
+            return ConnectionTestResult(
+                success=False,
+                error=f"Connection failed: {str(e)}",
+                response_time_ms=response_time
+            )
+
+
+async def _test_gemini_connection(config: LLMConfiguration, start_time: float) -> ConnectionTestResult:
+    """Test Google Gemini connection."""
+    api_key = _get_effective_api_key(config)
+    if not api_key:
+        return ConnectionTestResult(
+            success=False,
+            error="API key is required for Google Gemini (set GEMINI_API_KEY in .env or provide in config)"
+        )
+
+    async with httpx.AsyncClient(timeout=30.0, verify=_SSL_VERIFY) as client:
+        try:
+            test_payload = {
+                "model": config.model,
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 10,
+                "temperature": config.temperature
+            }
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+
+            response = await client.post(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                json=test_payload,
+                headers=headers
+            )
+            response.raise_for_status()
+
+            response_time = int((time.time() - start_time) * 1000)
+            result_data = response.json()
+
+            return ConnectionTestResult(
+                success=True,
+                response_time_ms=response_time,
+                model_info={
+                    "model": result_data.get("model", config.model),
+                    "usage": result_data.get("usage", {}),
+                    "response_length": len(result_data.get("choices", [{}])[0].get("message", {}).get("content", ""))
+                }
+            )
+
+        except httpx.HTTPStatusError as e:
+            response_time = int((time.time() - start_time) * 1000)
+            error_detail = "Unknown error"
+
+            try:
+                error_data = e.response.json()
+                error_detail = error_data.get("error", {}).get("message", str(e))
+            except:
+                error_detail = str(e)
+
+            return ConnectionTestResult(
+                success=False,
+                error=f"Gemini API error: {error_detail}",
+                response_time_ms=response_time
+            )
+
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
             return ConnectionTestResult(

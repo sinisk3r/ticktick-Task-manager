@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
+from app.core.llm_config import get_llm_settings, DEFAULT_MODELS
 from app.models import LLMConfiguration, LLMProvider, Settings
 from app.services.llm_test import test_llm_connection
 
@@ -108,6 +109,56 @@ class ConnectionTestResult(BaseModel):
     error: Optional[str] = None
     response_time_ms: Optional[int] = None
     model_info: Optional[dict] = None
+
+
+class ProviderDefaults(BaseModel):
+    """Default configuration from environment for a provider."""
+    provider: str
+    model: str
+    has_api_key: bool
+    base_url: Optional[str] = None
+
+
+class EnvDefaultsResponse(BaseModel):
+    """Response model for environment defaults."""
+    active_provider: str
+    providers: dict[str, ProviderDefaults]
+
+
+@router.get("/defaults", response_model=EnvDefaultsResponse)
+async def get_env_defaults():
+    """
+    Get default LLM configuration from environment variables.
+
+    Returns the active provider and available API keys (without exposing actual keys).
+    Useful for pre-filling the configuration form with env defaults.
+    """
+    settings = get_llm_settings()
+
+    # Build provider defaults from env
+    providers = {}
+
+    # Check each provider for available API keys
+    provider_configs = [
+        ("ollama", settings.ollama_base_url, None),
+        ("openrouter", None, settings.openrouter_api_key),
+        ("anthropic", None, settings.anthropic_api_key),
+        ("openai", None, settings.openai_api_key),
+        ("gemini", None, settings.gemini_api_key),
+    ]
+
+    for provider, base_url, api_key in provider_configs:
+        providers[provider] = ProviderDefaults(
+            provider=provider,
+            model=DEFAULT_MODELS.get(provider, ""),
+            has_api_key=bool(api_key),
+            base_url=base_url if provider == "ollama" else None,
+        )
+
+    return EnvDefaultsResponse(
+        active_provider=settings.provider,
+        providers=providers,
+    )
 
 
 @router.get("", response_model=List[LLMConfigurationResponse])

@@ -212,7 +212,26 @@ export interface ConnectionTestResult {
   model_info?: Record<string, any>;
 }
 
+export interface ProviderDefaults {
+  provider: string;
+  model: string;
+  has_api_key: boolean;
+  base_url?: string | null;
+}
+
+export interface EnvDefaultsResponse {
+  active_provider: string;
+  providers: Record<string, ProviderDefaults>;
+}
+
 export const llmConfigAPI = {
+  /**
+   * Get default LLM configuration from environment variables
+   */
+  async getEnvDefaults(): Promise<EnvDefaultsResponse> {
+    return api.get('/api/llm-configurations/defaults');
+  },
+
   /**
    * List all LLM configurations for a user
    */

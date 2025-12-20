@@ -3,7 +3,8 @@
 import os
 from pathlib import Path
 from typing import Literal, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, model_validator
 import certifi
 
 # Ensure HTTP clients (httpx/openai/langchain) have a CA bundle available.
@@ -21,60 +22,117 @@ def get_ca_bundle_path() -> str:
     return os.environ.get("SSL_CERT_FILE", certifi.where())
 
 
+# Default models per provider
+DEFAULT_MODELS = {
+    "ollama": "qwen3:8b",
+    "openrouter": "meta-llama/llama-3.2-3b-instruct",
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o-mini",
+    "gemini": "gemini-2.5-flash",
+}
+
+
 class LLMSettings(BaseSettings):
     """
     LLM Provider Configuration
 
-    Supports multiple providers via config:
-    - ollama: Local Ollama instance
-    - openrouter: OpenRouter API
-    - anthropic: Anthropic Claude API
-    - openai: OpenAI API
+    Supports multiple providers with provider-specific API keys.
+    All keys can be stored in .env - just change LLM_PROVIDER to switch.
 
     Environment Variables:
     ---------------------
-    LLM_PROVIDER: Provider name (ollama | openrouter | anthropic | openai)
-    LLM_MODEL: Model identifier (e.g., qwen3:8b, claude-sonnet-4, gpt-4)
-    LLM_BASE_URL: Base URL for API (optional, defaults per provider)
-    LLM_API_KEY: API key (required for cloud providers)
+    LLM_PROVIDER: Active provider (ollama | openrouter | anthropic | openai | gemini)
+    LLM_MODEL: Model override (optional, uses provider default if not set)
     LLM_TEMPERATURE: Sampling temperature (0.0-1.0, default: 0.2)
     LLM_MAX_TOKENS: Maximum tokens to generate (default: 1000)
 
-    Examples:
-    ---------
+    Provider-Specific API Keys (persist all, use based on LLM_PROVIDER):
+    -------------------------------------------------------------------
+    GEMINI_API_KEY: Google AI Studio API key
+    OPENAI_API_KEY: OpenAI API key
+    ANTHROPIC_API_KEY: Anthropic API key
+    OPENROUTER_API_KEY: OpenRouter API key
+    OLLAMA_BASE_URL: Ollama server URL (default: http://localhost:11434)
+
+    Example .env:
+    -------------
+    # Active provider (change this to switch)
+    LLM_PROVIDER=gemini
+
+    # All API keys stored persistently
+    GEMINI_API_KEY=AIza...
+    OPENAI_API_KEY=sk-...
+    ANTHROPIC_API_KEY=sk-ant-...
+    OPENROUTER_API_KEY=sk-or-...
+
     # Ollama (local)
-    LLM_PROVIDER=ollama
-    LLM_MODEL=qwen3:8b
-    LLM_BASE_URL=http://localhost:11434
+    OLLAMA_BASE_URL=http://localhost:11434
 
-    # OpenRouter
-    LLM_PROVIDER=openrouter
-    LLM_MODEL=meta-llama/llama-3.2-3b-instruct
-    LLM_API_KEY=your_key
-
-    # Anthropic Claude
-    LLM_PROVIDER=anthropic
-    LLM_MODEL=claude-sonnet-4
-    LLM_API_KEY=your_key
-
-    # OpenAI
-    LLM_PROVIDER=openai
-    LLM_MODEL=gpt-4-turbo
-    LLM_API_KEY=your_key
+    # Optional overrides
+    LLM_MODEL=gemini-2.0-flash  # Override default model
+    LLM_TEMPERATURE=0.2
+    LLM_MAX_TOKENS=1000
     """
 
-    provider: Literal["ollama", "openrouter", "anthropic", "openai"] = "ollama"
-    model: str = "qwen3:8b"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    temperature: float = 0.2
-    max_tokens: int = 1000
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-    class Config:
-        env_file = ".env"
-        env_prefix = "LLM_"
-        case_sensitive = False
-        extra = "ignore"  # Ignore extra env vars that don't match our model
+    # Active provider selection (with LLM_ prefix)
+    provider: Literal["ollama", "openrouter", "anthropic", "openai", "gemini"] = Field(
+        default="ollama", alias="LLM_PROVIDER"
+    )
+
+    # Model override (if not set, uses DEFAULT_MODELS[provider])
+    model: Optional[str] = Field(default=None, alias="LLM_MODEL")
+
+    # Generation parameters
+    temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
+    max_tokens: int = Field(default=1000, alias="LLM_MAX_TOKENS")
+
+    # Provider-specific API keys (all can be stored, used based on provider)
+    gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
+
+    # Provider-specific URLs
+    ollama_base_url: Optional[str] = Field(
+        default="http://localhost:11434", alias="OLLAMA_BASE_URL"
+    )
+
+    # Legacy fallback (deprecated, use provider-specific keys)
+    api_key: Optional[str] = Field(default=None, alias="LLM_API_KEY")
+    base_url: Optional[str] = Field(default=None, alias="LLM_BASE_URL")
+
+    @model_validator(mode="after")
+    def resolve_provider_config(self) -> "LLMSettings":
+        """Resolve the API key and model based on the selected provider."""
+        # Set default model if not specified
+        if self.model is None:
+            self.model = DEFAULT_MODELS.get(self.provider, "qwen3:8b")
+
+        return self
+
+    def get_api_key(self) -> Optional[str]:
+        """Get the API key for the current provider."""
+        provider_keys = {
+            "gemini": self.gemini_api_key,
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+            "openrouter": self.openrouter_api_key,
+            "ollama": None,  # Ollama doesn't need an API key
+        }
+        # Try provider-specific key first, fall back to legacy LLM_API_KEY
+        return provider_keys.get(self.provider) or self.api_key
+
+    def get_base_url(self) -> Optional[str]:
+        """Get the base URL for the current provider."""
+        if self.provider == "ollama":
+            return self.ollama_base_url or self.base_url or "http://localhost:11434"
+        return self.base_url
 
 
 def get_llm_settings() -> LLMSettings:
@@ -82,9 +140,9 @@ def get_llm_settings() -> LLMSettings:
     Get current LLM settings from environment.
 
     Returns:
-        LLMSettings instance with configuration
+        LLMSettings instance with configuration resolved for the active provider
 
     Raises:
-        ValidationError: If required config is missing (e.g., API key for cloud providers)
+        ValidationError: If required config is missing
     """
     return LLMSettings()

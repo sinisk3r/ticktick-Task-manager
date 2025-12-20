@@ -10,11 +10,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, XCircle, Loader2, Plus, Edit, Trash2, TestTube, Settings, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { llmConfigAPI, settingsAPI, LLMConfiguration, LLMConfigurationCreate, LLMConfigurationUpdate, LLMProvider, ConnectionTestResult } from "@/lib/api"
+import { llmConfigAPI, settingsAPI, LLMConfiguration, LLMConfigurationCreate, LLMConfigurationUpdate, LLMProvider, ConnectionTestResult, EnvDefaultsResponse } from "@/lib/api"
 
 export function LLMConfigurationManager() {
   const [configurations, setConfigurations] = useState<LLMConfiguration[]>([])
   const [activeConfigId, setActiveConfigId] = useState<number | null>(null)
+  const [envDefaults, setEnvDefaults] = useState<EnvDefaultsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,14 +54,16 @@ export function LLMConfigurationManager() {
       setLoading(true)
       setError(null)
 
-      // Load configurations and settings in parallel
-      const [configsData, settingsData] = await Promise.all([
+      // Load configurations, settings, and env defaults in parallel
+      const [configsData, settingsData, defaultsData] = await Promise.all([
         llmConfigAPI.listConfigurations(userId),
-        settingsAPI.getSettings(userId)
+        settingsAPI.getSettings(userId),
+        llmConfigAPI.getEnvDefaults()
       ])
 
       setConfigurations(configsData)
       setActiveConfigId(settingsData.active_llm_config_id ?? null)
+      setEnvDefaults(defaultsData)
     } catch (err: any) {
       setError(err.message || 'Failed to load configurations')
     } finally {
@@ -203,7 +206,7 @@ export function LLMConfigurationManager() {
       case 'openai':
         return 'OpenAI model (e.g., gpt-4-turbo, gpt-3.5-turbo)'
       case 'gemini':
-        return 'Google Gemini model (coming soon)'
+        return 'Google Gemini model (e.g., gemini-2.0-flash, gemini-pro)'
       default:
         return ''
     }
@@ -215,6 +218,26 @@ export function LLMConfigurationManager() {
 
   const requiresBaseUrl = (provider: LLMProvider): boolean => {
     return provider === 'ollama'
+  }
+
+  const hasEnvApiKey = (provider: LLMProvider): boolean => {
+    return envDefaults?.providers[provider]?.has_api_key ?? false
+  }
+
+  const getEnvDefaultsForProvider = (provider: LLMProvider) => {
+    return envDefaults?.providers[provider]
+  }
+
+  const handleProviderChange = (provider: LLMProvider) => {
+    const defaults = getEnvDefaultsForProvider(provider)
+    setFormData({
+      ...formData,
+      provider,
+      model: defaults?.model || "",
+      base_url: defaults?.base_url || (provider === 'ollama' ? 'http://localhost:11434' : ""),
+      // Clear API key when switching providers
+      api_key: ""
+    })
   }
 
   const getConnectionStatusBadge = (config: LLMConfiguration) => {
@@ -258,6 +281,26 @@ export function LLMConfigurationManager() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Environment Configuration Info */}
+          {envDefaults && (
+            <Alert className="border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20">
+              <Settings className="h-4 w-4 text-blue-500" />
+              <AlertDescription className="text-blue-600 dark:text-blue-400">
+                <div className="space-y-1">
+                  <p className="font-medium">Environment Configuration</p>
+                  <p className="text-xs">
+                    Default provider: <strong>{envDefaults.active_provider}</strong> |
+                    Available API keys: {' '}
+                    {Object.entries(envDefaults.providers)
+                      .filter(([, p]) => p.has_api_key || p.provider === 'ollama')
+                      .map(([name]) => name)
+                      .join(', ') || 'none'}
+                  </p>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {error && (
             <Alert className="border-red-200 bg-red-50 dark:border-red-700 dark:bg-red-900/20">
               <AlertCircle className="h-4 w-4 text-red-500" />
@@ -371,19 +414,27 @@ export function LLMConfigurationManager() {
                   <Label htmlFor="provider">Provider</Label>
                   <Select
                     value={formData.provider}
-                    onValueChange={(value: LLMProvider) =>
-                      setFormData({ ...formData, provider: value })
-                    }
+                    onValueChange={(value: LLMProvider) => handleProviderChange(value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
-                      <SelectItem value="anthropic">Anthropic Claude</SelectItem>
-                      <SelectItem value="openai">OpenAI</SelectItem>
-                      <SelectItem value="gemini" disabled>Gemini (Coming Soon)</SelectItem>
+                      <SelectItem value="ollama">
+                        Ollama (Local)
+                      </SelectItem>
+                      <SelectItem value="openrouter">
+                        OpenRouter {hasEnvApiKey('openrouter') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="anthropic">
+                        Anthropic Claude {hasEnvApiKey('anthropic') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="openai">
+                        OpenAI {hasEnvApiKey('openai') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="gemini">
+                        Google Gemini {hasEnvApiKey('gemini') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -405,14 +456,24 @@ export function LLMConfigurationManager() {
                 {/* API Key (for cloud providers) */}
                 {requiresApiKey(formData.provider) && (
                   <div className="space-y-2">
-                    <Label htmlFor="api-key">API Key</Label>
+                    <Label htmlFor="api-key">
+                      API Key
+                      {hasEnvApiKey(formData.provider) && (
+                        <span className="text-green-500 text-xs ml-2">(env key available)</span>
+                      )}
+                    </Label>
                     <Input
                       id="api-key"
                       type="password"
                       value={formData.api_key}
                       onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                      placeholder="sk-..."
+                      placeholder={hasEnvApiKey(formData.provider) ? "Leave blank to use env key" : "sk-..."}
                     />
+                    {hasEnvApiKey(formData.provider) && (
+                      <p className="text-xs text-muted-foreground">
+                        An API key is configured in the server environment. Leave this blank to use it.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -508,19 +569,27 @@ export function LLMConfigurationManager() {
                   <Label htmlFor="edit-provider">Provider</Label>
                   <Select
                     value={formData.provider}
-                    onValueChange={(value: LLMProvider) =>
-                      setFormData({ ...formData, provider: value })
-                    }
+                    onValueChange={(value: LLMProvider) => handleProviderChange(value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
-                      <SelectItem value="anthropic">Anthropic Claude</SelectItem>
-                      <SelectItem value="openai">OpenAI</SelectItem>
-                      <SelectItem value="gemini" disabled>Gemini (Coming Soon)</SelectItem>
+                      <SelectItem value="ollama">
+                        Ollama (Local)
+                      </SelectItem>
+                      <SelectItem value="openrouter">
+                        OpenRouter {hasEnvApiKey('openrouter') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="anthropic">
+                        Anthropic Claude {hasEnvApiKey('anthropic') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="openai">
+                        OpenAI {hasEnvApiKey('openai') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
+                      <SelectItem value="gemini">
+                        Google Gemini {hasEnvApiKey('gemini') && <span className="text-green-500 ml-1">✓ key</span>}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -537,14 +606,24 @@ export function LLMConfigurationManager() {
 
                 {requiresApiKey(formData.provider) && (
                   <div className="space-y-2">
-                    <Label htmlFor="edit-api-key">API Key (leave blank to keep existing)</Label>
+                    <Label htmlFor="edit-api-key">
+                      API Key (leave blank to keep existing)
+                      {hasEnvApiKey(formData.provider) && (
+                        <span className="text-green-500 text-xs ml-2">(env key available)</span>
+                      )}
+                    </Label>
                     <Input
                       id="edit-api-key"
                       type="password"
                       value={formData.api_key}
                       onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                      placeholder="Leave blank to keep existing key"
+                      placeholder={hasEnvApiKey(formData.provider) ? "Leave blank to use env key" : "Leave blank to keep existing key"}
                     />
+                    {hasEnvApiKey(formData.provider) && (
+                      <p className="text-xs text-muted-foreground">
+                        An API key is configured in the server environment. Leave blank to use it.
+                      </p>
+                    )}
                   </div>
                 )}
 

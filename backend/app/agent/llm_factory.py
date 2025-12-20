@@ -3,6 +3,7 @@
 from typing import Union, Optional
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -41,19 +42,24 @@ def get_llm_provider(settings: LLMSettings) -> BaseChatModel:
     - openrouter: OpenRouter API (requires API key)
     - anthropic: Anthropic Claude API (requires API key)
     - openai: OpenAI API (requires API key)
+    - gemini: Google Gemini API (requires API key)
     """
+
+    # Get API key using the new provider-specific resolution
+    api_key = settings.get_api_key() if hasattr(settings, 'get_api_key') else settings.api_key
+    base_url = settings.get_base_url() if hasattr(settings, 'get_base_url') else settings.base_url
 
     if settings.provider == "ollama":
         return ChatOllama(
             model=settings.model,
-            base_url=settings.base_url or "http://localhost:11434",
+            base_url=base_url or "http://localhost:11434",
             temperature=settings.temperature,
             num_predict=settings.max_tokens,
         )
 
     elif settings.provider == "openrouter":
-        if not settings.api_key:
-            raise ValueError("OpenRouter provider requires LLM_API_KEY environment variable")
+        if not api_key:
+            raise ValueError("OpenRouter provider requires OPENROUTER_API_KEY environment variable")
 
         ca_path = get_ca_bundle_path()
         # LangChain expects httpx.Client for http_client and httpx.AsyncClient for
@@ -64,38 +70,49 @@ def get_llm_provider(settings: LLMSettings) -> BaseChatModel:
         return ChatOpenAI(
             model=settings.model,
             base_url="https://openrouter.ai/api/v1",
-            api_key=settings.api_key,
+            api_key=api_key,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens,
             http_async_client=http_async_client,
         )
 
     elif settings.provider == "anthropic":
-        if not settings.api_key:
-            raise ValueError("Anthropic provider requires LLM_API_KEY environment variable")
+        if not api_key:
+            raise ValueError("Anthropic provider requires ANTHROPIC_API_KEY environment variable")
 
         return ChatAnthropic(
             model=settings.model,
-            api_key=settings.api_key,
+            api_key=api_key,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens,
         )
 
     elif settings.provider == "openai":
-        if not settings.api_key:
-            raise ValueError("OpenAI provider requires LLM_API_KEY environment variable")
+        if not api_key:
+            raise ValueError("OpenAI provider requires OPENAI_API_KEY environment variable")
 
         return ChatOpenAI(
             model=settings.model,
-            api_key=settings.api_key,
+            api_key=api_key,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens,
+        )
+
+    elif settings.provider == "gemini":
+        if not api_key:
+            raise ValueError("Gemini provider requires GEMINI_API_KEY environment variable")
+
+        return ChatGoogleGenerativeAI(
+            model=settings.model,
+            google_api_key=api_key,
+            temperature=settings.temperature,
+            max_output_tokens=settings.max_tokens,
         )
 
     else:
         raise ValueError(
             f"Unknown LLM provider: {settings.provider}. "
-            f"Supported providers: ollama, openrouter, anthropic, openai"
+            f"Supported providers: ollama, openrouter, anthropic, openai, gemini"
         )
 
 
