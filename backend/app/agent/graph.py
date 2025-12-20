@@ -231,7 +231,7 @@ async def create_agent(
         agent = create_react_agent(
             model=llm,
             tools=tools_list,
-            state_modifier=get_system_message(),
+            prompt=get_system_message(),
             checkpointer=checkpointer,
         )
 
