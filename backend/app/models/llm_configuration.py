@@ -78,3 +78,4 @@ class LLMConfiguration(Base):
         return self.provider == LLMProvider.OLLAMA
 
 
+
