@@ -110,13 +110,25 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
                     if chunk:
                         content = getattr(chunk, "content", "")
                         if content:
-                            accumulated_message += content
-                            # Always emit as "message" - cloud APIs don't have separate thinking
-                            # Tool calls will be shown inline chronologically
-                            yield _format_sse("message", {
-                                "trace_id": trace_id,
-                                "delta": content,
-                            })
+                            # Handle case where content is a list of content blocks (e.g., Anthropic)
+                            # Some providers return list of dicts like [{"type": "text", "text": "..."}]
+                            if isinstance(content, list):
+                                text_content = ""
+                                for block in content:
+                                    if isinstance(block, dict) and block.get("type") == "text":
+                                        text_content += block.get("text", "")
+                                    elif isinstance(block, str):
+                                        text_content += block
+                                content = text_content
+
+                            if content:  # Check again after potential list conversion
+                                accumulated_message += content
+                                # Always emit as "message" - cloud APIs don't have separate thinking
+                                # Tool calls will be shown inline chronologically
+                                yield _format_sse("message", {
+                                    "trace_id": trace_id,
+                                    "delta": content,
+                                })
 
                 elif event_type == "on_tool_start":
                     # Tool is about to be called - enter tool/reasoning phase
