@@ -100,6 +100,13 @@ Today is {current_date} at {current_time}.
 - For greetings or general questions, respond naturally without calling tools
 - If you need more information, ask clarifying questions
 
+**Task display in responses:**
+- When mentioning tasks in your responses, use the format [TASK:{id}] where {id} is the task ID
+- Example: "I found these tasks: [TASK:123] and [TASK:456]"
+- This allows the UI to display interactive task cards instead of plain text
+- Always include the task ID reference when listing, creating, updating, or discussing specific tasks
+- The task data will be automatically included from tool results, so you only need to reference the ID
+
 **Task creation guidelines:**
 - Extract clear, concise titles (max 120 chars, no quotes)
 - Only add description if it provides meaningful context beyond the title

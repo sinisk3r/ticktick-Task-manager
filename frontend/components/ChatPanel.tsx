@@ -25,6 +25,9 @@ import {
     useAgentStream,
 } from "@/lib/useAgentStream";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
+import { ChatTaskCard } from "@/components/ChatTaskCard";
+import { Task } from "@/types/task";
+import { api } from "@/lib/api";
 
 const escapeHtml = (value: string) =>
     value
@@ -41,6 +44,139 @@ const renderMarkdownLite = (value: string) => {
     html = html.replace(/`(.+?)`/g, "<code>$1</code>");
     html = html.replace(/\n/g, "<br>");
     return html;
+};
+
+// Parse task references from message content
+// Format: [TASK:{id}] or JSON blocks with task data
+const parseTaskReferences = (content: string): Array<{ id: number; start: number; end: number }> => {
+    const tasks: Array<{ id: number; start: number; end: number }> = [];
+    
+    // Match [TASK:123] format
+    const taskIdRegex = /\[TASK:(\d+)\]/g;
+    let match;
+    while ((match = taskIdRegex.exec(content)) !== null) {
+        tasks.push({
+            id: parseInt(match[1], 10),
+            start: match.index,
+            end: match.index + match[0].length,
+        });
+    }
+    
+    // Match JSON task blocks: ```json\n{"task": {...}}\n```
+    const jsonBlockRegex = /```json\s*\{[\s\S]*?"task"[\s\S]*?\}\s*```/g;
+    while ((match = jsonBlockRegex.exec(content)) !== null) {
+        try {
+            const jsonStr = match[0].replace(/```json\s*|\s*```/g, "");
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.task?.id) {
+                tasks.push({
+                    id: parsed.task.id,
+                    start: match.index,
+                    end: match.index + match[0].length,
+                });
+            }
+        } catch {
+            // Ignore parse errors
+        }
+    }
+    
+    return tasks.sort((a, b) => a.start - b.start);
+};
+
+// Extract tasks from events (tool results, payloads)
+const extractTasksFromEvents = (events: AgentEvent[]): Task[] => {
+    const tasks: Task[] = [];
+    const seenIds = new Set<number>();
+    
+    const addTask = (task: Task) => {
+        if (task?.id && !seenIds.has(task.id)) {
+            seenIds.add(task.id);
+            tasks.push(task);
+        }
+    };
+    
+    for (const event of events) {
+        // Check tool_result events
+        if (event.type === "tool_result") {
+            // Log the full event data structure
+            console.log("[ChatPanel] Tool result event:", {
+                eventType: event.type,
+                hasData: !!event.data,
+                dataKeys: event.data ? Object.keys(event.data) : [],
+                hasResult: !!event.data?.result,
+                fullEventData: event.data, // Log full event data
+            });
+            
+            if (!event.data?.result) {
+                continue;
+            }
+            
+            let result = event.data.result;
+            
+            // Handle case where result might be a string that needs parsing
+            if (typeof result === "string") {
+                try {
+                    result = JSON.parse(result);
+                } catch (e) {
+                    console.warn("[ChatPanel] Failed to parse tool_result as JSON:", e);
+                    continue;
+                }
+            }
+            
+            // Debug: Log the full result structure
+            console.log("[ChatPanel] Tool result structure:", {
+                resultType: typeof result,
+                resultKeys: typeof result === "object" && result !== null ? Object.keys(result) : [],
+                hasTask: !!result?.task,
+                hasTasks: !!result?.tasks,
+                tasksIsArray: Array.isArray(result?.tasks),
+                tasksLength: Array.isArray(result?.tasks) ? result.tasks.length : 0,
+                firstTask: Array.isArray(result?.tasks) && result.tasks.length > 0 ? result.tasks[0] : null,
+            });
+            
+            // Single task
+            if (result?.task && typeof result.task === "object") {
+                addTask(result.task as Task);
+            }
+            
+            // Multiple tasks
+            if (result?.tasks && Array.isArray(result.tasks)) {
+                console.log("[ChatPanel] Extracting tasks from array, count:", result.tasks.length);
+                for (const task of result.tasks) {
+                    if (task && typeof task === "object" && task.id) {
+                        addTask(task as Task);
+                    }
+                }
+            }
+            
+            // Payload tasks
+            if (result.payload?.tasks) {
+                if (Array.isArray(result.payload.tasks)) {
+                    for (const task of result.payload.tasks) {
+                        if (task && typeof task === "object") {
+                            addTask(task as Task);
+                        }
+                    }
+                } else if (result.payload.tasks && typeof result.payload.tasks === "object") {
+                    addTask(result.payload.tasks as Task);
+                }
+            }
+            
+            // Stale tasks (from detect_stale_tasks)
+            if (result.stale_tasks && Array.isArray(result.stale_tasks)) {
+                // These may have different structure, try to extract task IDs and fetch them
+                for (const staleTask of result.stale_tasks) {
+                    if (staleTask?.id && typeof staleTask.id === "number") {
+                        // We'll need to fetch the full task, but for now just note the ID
+                        // The frontend can fetch if needed
+                    }
+                }
+            }
+        }
+    }
+    
+    console.log("[ChatPanel] Extracted tasks:", tasks.length, "unique tasks");
+    return tasks;
 };
 
 const EventRow = ({ event }: { event: AgentEvent }) => {
@@ -88,7 +224,71 @@ const EventRow = ({ event }: { event: AgentEvent }) => {
 };
 
 // Render events chronologically, interleaving text chunks and tool actions
-const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string, isStreaming: boolean) => {
+const renderChronologicalEvents = (
+    events: AgentEvent[],
+    fallbackContent: string,
+    isStreaming: boolean,
+    messagePayload?: Record<string, any>
+) => {
+    // Extract tasks from events and payload
+    const tasksFromEvents = extractTasksFromEvents(events);
+    
+    // Also check message events for payload tasks
+    const tasksFromMessageEvents: Task[] = [];
+    for (const event of events) {
+        if (event.type === "message" && event.data?.payload) {
+            console.log("[ChatPanel] Message event payload:", {
+                hasPayload: !!event.data.payload,
+                payloadKeys: Object.keys(event.data.payload || {}),
+                hasTasks: !!event.data.payload.tasks,
+                tasksIsArray: Array.isArray(event.data.payload.tasks),
+                payload: event.data.payload, // Log full payload
+            });
+            
+            const payloadTasks = event.data.payload.tasks;
+            if (Array.isArray(payloadTasks)) {
+                console.log("[ChatPanel] Found tasks in message payload, count:", payloadTasks.length);
+                tasksFromMessageEvents.push(...payloadTasks.filter(t => t?.id));
+            } else if (payloadTasks?.id) {
+                tasksFromMessageEvents.push(payloadTasks);
+            }
+        }
+    }
+    
+    // Check the message payload parameter
+    console.log("[ChatPanel] Message payload parameter:", {
+        hasPayload: !!messagePayload,
+        payloadKeys: messagePayload ? Object.keys(messagePayload) : [],
+        hasTasks: !!messagePayload?.tasks,
+        tasksIsArray: Array.isArray(messagePayload?.tasks),
+    });
+    
+    const tasksFromPayload = messagePayload?.tasks 
+        ? (Array.isArray(messagePayload.tasks) ? messagePayload.tasks : [messagePayload.tasks])
+        : [];
+    
+    const allTasks = [...tasksFromEvents, ...tasksFromMessageEvents, ...tasksFromPayload];
+    
+    console.log("[ChatPanel] All extracted tasks summary:", {
+        fromEvents: tasksFromEvents.length,
+        fromMessageEvents: tasksFromMessageEvents.length,
+        fromPayload: tasksFromPayload.length,
+        total: allTasks.length,
+    });
+    
+    // Create a map of task ID to task data for quick lookup
+    const taskMap = new Map<number, Task>();
+    for (const task of allTasks) {
+        if (task?.id) {
+            taskMap.set(task.id, task as Task);
+        }
+    }
+    
+    // Debug log
+    if (taskMap.size > 0) {
+        console.log("[ChatPanel] Task map created with", taskMap.size, "tasks");
+    }
+
     if (!events.length) {
         // No events yet - show animated thinking if streaming, otherwise show content
         if (!fallbackContent && isStreaming) {
@@ -98,15 +298,8 @@ const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string
                 </div>
             );
         }
-        // Fall back to rendering content as-is
-        return (
-            <div
-                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
-                dangerouslySetInnerHTML={{
-                    __html: renderMarkdownLite(fallbackContent || ""),
-                }}
-            />
-        );
+        // Render content with task cards
+        return renderContentWithTasks(fallbackContent || "", taskMap);
     }
 
     const segments: React.ReactNode[] = [];
@@ -125,13 +318,9 @@ const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string
             // Non-text event (tool call, step, etc.) - flush text buffer first, then render the event
             if (currentTextBuffer.trim()) {
                 segments.push(
-                    <div
-                        key={`text-${i}`}
-                        className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
-                        dangerouslySetInnerHTML={{
-                            __html: renderMarkdownLite(currentTextBuffer.trim()),
-                        }}
-                    />
+                    <div key={`text-${i}`} className="my-2">
+                        {renderContentWithTasks(currentTextBuffer.trim(), taskMap)}
+                    </div>
                 );
                 currentTextBuffer = "";
             }
@@ -150,13 +339,9 @@ const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string
     // Flush remaining text
     if (currentTextBuffer.trim()) {
         segments.push(
-            <div
-                key="text-final"
-                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
-                dangerouslySetInnerHTML={{
-                    __html: renderMarkdownLite(currentTextBuffer.trim()),
-                }}
-            />
+            <div key="text-final" className="my-2">
+                {renderContentWithTasks(currentTextBuffer.trim(), taskMap)}
+            </div>
         );
     }
 
@@ -169,17 +354,103 @@ const renderChronologicalEvents = (events: AgentEvent[], fallbackContent: string
                 </div>
             );
         }
+        return renderContentWithTasks(fallbackContent || "", taskMap);
+    }
+
+    return <>{segments}</>;
+};
+
+// Render content with task cards embedded
+const renderContentWithTasks = (content: string, taskMap: Map<number, Task>) => {
+    const taskRefs = parseTaskReferences(content);
+    
+    // Debug: Log task references and task map size
+    if (taskRefs.length > 0) {
+        console.log("[ChatPanel] Found task references:", taskRefs.map(t => t.id));
+        console.log("[ChatPanel] Task map size:", taskMap.size);
+        console.log("[ChatPanel] Task map keys:", Array.from(taskMap.keys()));
+    }
+    
+    if (taskRefs.length === 0) {
+        // No task references, render as normal markdown
         return (
             <div
                 className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
                 dangerouslySetInnerHTML={{
-                    __html: renderMarkdownLite(fallbackContent || ""),
+                    __html: renderMarkdownLite(content),
                 }}
             />
         );
     }
 
-    return <>{segments}</>;
+    // Split content by lines and process each line
+    const lines = content.split('\n');
+    const parts: React.ReactNode[] = [];
+    let hasRenderedTasks = false;
+    
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        const line = lines[lineIdx];
+        const lineTaskRefs = parseTaskReferences(line);
+        
+        if (lineTaskRefs.length === 0) {
+            // No task reference in this line, render as normal
+            if (line.trim()) {
+                parts.push(
+                    <div
+                        key={`line-${lineIdx}`}
+                        className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                        dangerouslySetInnerHTML={{
+                            __html: renderMarkdownLite(line + (lineIdx < lines.length - 1 ? '\n' : '')),
+                        }}
+                    />
+                );
+            }
+        } else {
+            // This line contains task references - replace the entire line with task cards
+            for (const taskRef of lineTaskRefs) {
+                const task = taskMap.get(taskRef.id);
+                
+                if (task) {
+                    // Replace the list item with a task card
+                    hasRenderedTasks = true;
+                    parts.push(
+                        <div key={`task-${taskRef.id}-${lineIdx}`} className="my-2">
+                            <ChatTaskCard task={task} />
+                        </div>
+                    );
+                } else {
+                    console.warn("[ChatPanel] Task not found in map:", taskRef.id);
+                    // Task not found in map, render line as-is (but only once per line)
+                    if (taskRef === lineTaskRefs[0] && line.trim()) {
+                        parts.push(
+                            <div
+                                key={`line-${lineIdx}`}
+                                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+                                dangerouslySetInnerHTML={{
+                                    __html: renderMarkdownLite(line + (lineIdx < lines.length - 1 ? '\n' : '')),
+                                }}
+                            />
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // If we rendered tasks, return the parts; otherwise fall back to normal rendering
+    if (hasRenderedTasks) {
+        return <div className="space-y-2">{parts}</div>;
+    }
+    
+    // Fallback: render as normal markdown
+    return (
+        <div
+            className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
+            dangerouslySetInnerHTML={{
+                __html: renderMarkdownLite(content),
+            }}
+        />
+    );
 };
 
 const AgentTimeline = ({
@@ -337,7 +608,7 @@ const MessageBubble = ({
                             </div>
                         ) : null}
                         {/* Render events chronologically, interleaving text and tool calls */}
-                        {renderChronologicalEvents(message.events, message.content, isStreaming)}
+                        {renderChronologicalEvents(message.events, message.content, isStreaming, message.payload)}
                         <AgentTimeline
                             events={message.events}
                             pendingAction={pendingAction}

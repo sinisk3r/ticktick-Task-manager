@@ -69,6 +69,7 @@ export function TaskDetailPopover({
   const [error, setError] = useState<string | null>(null)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [mounted, setMounted] = useState(false)
+  const [isFromChat, setIsFromChat] = useState(false)
 
   // AI State (simplified)
   const [enhancing, setEnhancing] = useState(false)
@@ -113,12 +114,26 @@ export function TaskDetailPopover({
     const popoverHeight = 600
     const padding = 20
 
+    // Check if click is from chat panel (right side of screen)
+    const chatPanelWidth = 400 // Approximate chat panel width
+    const clickedFromChat = e.clientX > window.innerWidth - chatPanelWidth - 100
+    setIsFromChat(clickedFromChat)
+
     let x = e.clientX + 10 // Offset from cursor
     let y = e.clientY + 10
 
-    // Check right edge
-    if (x + popoverWidth > window.innerWidth - padding) {
-      x = window.innerWidth - popoverWidth - padding
+    // If opened from chat, position to the left of chat panel
+    if (clickedFromChat) {
+      x = window.innerWidth - chatPanelWidth - popoverWidth - padding
+      // Center vertically if possible, otherwise position near click
+      const centeredY = Math.max(padding, (window.innerHeight - popoverHeight) / 2)
+      y = Math.min(centeredY, e.clientY - popoverHeight / 2)
+    } else {
+      // Normal positioning for non-chat usage
+      // Check right edge
+      if (x + popoverWidth > window.innerWidth - padding) {
+        x = window.innerWidth - popoverWidth - padding
+      }
     }
 
     // Check bottom edge
@@ -376,15 +391,20 @@ export function TaskDetailPopover({
 
       {mounted && open && createPortal(
         <>
-          {/* Backdrop */}
+          {/* Backdrop - lighter and positioned to avoid chat when opened from chat */}
           <div
-            className="fixed inset-0 bg-black/50 z-50 animate-in fade-in"
+            className={cn(
+              "fixed z-[100] animate-in fade-in",
+              isFromChat 
+                ? "left-0 top-0 bottom-0 bg-black/20 right-[400px]" 
+                : "inset-0 bg-black/30"
+            )}
             onClick={() => setOpen(false)}
           />
 
           {/* Popover Content */}
           <div
-            className="fixed z-[60] w-[680px] h-[600px] bg-background border rounded-lg shadow-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+            className="fixed z-[110] w-[680px] h-[600px] bg-background border rounded-lg shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
             style={{
               left: `${position.x}px`,
               top: `${position.y}px`,
