@@ -135,6 +135,75 @@ class LLMSettings(BaseSettings):
         return self.base_url
 
 
+class LLMUserConfig:
+    """
+    Simple LLM configuration container for user-specific settings.
+
+    Unlike LLMSettings, this does NOT read provider/model from environment variables,
+    ensuring user's saved configuration is respected. However, API keys DO fall back
+    to environment variables if not stored in the database (for convenience).
+    """
+
+    # Environment variable names for provider-specific API keys
+    _ENV_API_KEYS = {
+        "gemini": "GEMINI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
+
+    _ENV_BASE_URLS = {
+        "ollama": "OLLAMA_BASE_URL",
+    }
+
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.2,
+        max_tokens: int = 1000,
+    ):
+        self.provider = provider
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    def get_api_key(self) -> Optional[str]:
+        """
+        Return API key, falling back to environment variable if not stored.
+
+        Priority: stored api_key > provider-specific env var > legacy LLM_API_KEY
+        """
+        if self.api_key:
+            return self.api_key
+
+        # Fall back to provider-specific environment variable
+        env_var = self._ENV_API_KEYS.get(self.provider)
+        if env_var:
+            return os.environ.get(env_var)
+
+        # Final fallback to legacy LLM_API_KEY
+        return os.environ.get("LLM_API_KEY")
+
+    def get_base_url(self) -> Optional[str]:
+        """
+        Return base URL, falling back to environment variable for Ollama.
+        """
+        if self.base_url:
+            return self.base_url
+
+        # Fall back to provider-specific environment variable
+        env_var = self._ENV_BASE_URLS.get(self.provider)
+        if env_var:
+            return os.environ.get(env_var, "http://localhost:11434")
+
+        return None
+
+
 def get_llm_settings() -> LLMSettings:
     """
     Get current LLM settings from environment.

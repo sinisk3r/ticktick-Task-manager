@@ -1,6 +1,7 @@
 """LLM Provider Factory - Plugin-based provider selection"""
 
-from typing import Union, Optional
+import logging
+from typing import Optional, Union
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -11,12 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.llm_config import LLMSettings, get_ca_bundle_path
+from app.core.llm_config import LLMSettings, LLMUserConfig, get_ca_bundle_path
 from app.models.settings import Settings as UserSettings
 from app.models.llm_configuration import LLMProvider
 
+logger = logging.getLogger(__name__)
 
-def get_llm_provider(settings: LLMSettings) -> BaseChatModel:
+
+def get_llm_provider(settings: Union[LLMSettings, LLMUserConfig]) -> BaseChatModel:
     """
     Factory to create LLM provider based on configuration.
 
@@ -102,6 +105,9 @@ def get_llm_provider(settings: LLMSettings) -> BaseChatModel:
         if not api_key:
             raise ValueError("Gemini provider requires GEMINI_API_KEY environment variable")
 
+        # Log the model being used for Gemini
+        logger.info(f"Creating ChatGoogleGenerativeAI with model={settings.model}")
+
         return ChatGoogleGenerativeAI(
             model=settings.model,
             google_api_key=api_key,
@@ -144,12 +150,35 @@ async def get_llm_for_user(user_id: int, db: AsyncSession) -> BaseChatModel:
     if not user_settings or not user_settings.active_llm_config:
         from app.core.llm_config import get_llm_settings
         env_settings = get_llm_settings()
+        logger.warning(f"No active LLM config for user_id={user_id}, using environment defaults")
         return get_llm_provider(env_settings)
 
+    # Expire and refresh the relationship to ensure we have the latest config
+    # This ensures we get fresh data after the active config is changed
+    db.expire(user_settings, ["active_llm_config"])
+    await db.refresh(user_settings, ["active_llm_config"])
     active_config = user_settings.active_llm_config
+    
+    # Double-check we have the config after refresh
+    if not active_config:
+        from app.core.llm_config import get_llm_settings
+        env_settings = get_llm_settings()
+        logger.warning(f"Active LLM config not found after refresh for user_id={user_id}, using environment defaults")
+        return get_llm_provider(env_settings)
 
-    # Convert active LLM configuration to LLMSettings
-    llm_settings = LLMSettings(
+    # Log the configuration being used for debugging
+    logger.info(
+        f"Using LLM config for user_id={user_id}: "
+        f"provider={active_config.provider.value}, "
+        f"model={active_config.model}, "
+        f"temperature={active_config.temperature}, "
+        f"max_tokens={active_config.max_tokens}"
+    )
+
+    # Use LLMUserConfig instead of LLMSettings to avoid environment variable interference
+    # LLMSettings extends BaseSettings which reads from .env, potentially overriding user settings
+    # LLMUserConfig is a simple container that only uses the values passed to it
+    user_config = LLMUserConfig(
         provider=active_config.provider.value,
         model=active_config.model,
         api_key=active_config.api_key,
@@ -158,7 +187,9 @@ async def get_llm_for_user(user_id: int, db: AsyncSession) -> BaseChatModel:
         max_tokens=active_config.max_tokens or 1000,
     )
 
-    return get_llm_provider(llm_settings)
+    logger.info(f"Final LLM model: {user_config.model} (provider: {user_config.provider})")
+
+    return get_llm_provider(user_config)
 
 
 def get_llm() -> BaseChatModel:
