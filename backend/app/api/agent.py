@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from app.agent.graph import create_agent
 from app.agent import tools as agent_tools
@@ -69,9 +70,13 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
                 for msg in payload.messages:
                     # Convert conversation history to LangChain messages
                     # Frontend sends: {role: 'user'|'assistant', content: str}
-                    if msg.get("role") == "user":
-                        messages.append(HumanMessage(content=msg["content"]))
-                    # Note: Assistant messages will be reconstructed from checkpointer
+                    role = msg.get("role")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        messages.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        messages.append(AIMessage(content=content))
+                    # Skip other roles or invalid messages
 
             # Add current goal as new human message
             messages.append(HumanMessage(content=payload.goal))
@@ -194,10 +199,35 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
 
         except Exception as exc:  # noqa: BLE001
             logger.exception("Agent stream failed (trace_id=%s)", trace_id)
-            yield _format_sse("error", {
+            
+            # Try to extract structured error information
+            error_message = str(exc)
+            error_data: Dict[str, Any] = {
                 "trace_id": trace_id,
-                "message": str(exc),
-            })
+                "message": error_message,
+                "type": type(exc).__name__,
+            }
+            
+            # Try to parse JSON error messages (common with API errors)
+            try:
+                # Check if the error message contains JSON
+                if "{" in error_message and "}" in error_message:
+                    # Try to extract JSON from the error message
+                    json_match = re.search(r'\{.*\}', error_message, re.DOTALL)
+                    if json_match:
+                        parsed_json = json.loads(json_match.group())
+                        error_data["parsed_error"] = parsed_json
+                        # Extract user-friendly message if available
+                        if isinstance(parsed_json, dict):
+                            if parsed_json.get("error", {}).get("message"):
+                                error_data["user_message"] = parsed_json["error"]["message"]
+                            elif parsed_json.get("message"):
+                                error_data["user_message"] = parsed_json["message"]
+            except (json.JSONDecodeError, AttributeError):
+                # Not JSON, use the error message as-is
+                pass
+            
+            yield _format_sse("error", error_data)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

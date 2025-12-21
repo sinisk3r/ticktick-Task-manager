@@ -81,19 +81,21 @@ def task_to_payload(task: Task) -> Dict[str, Any]:
 @tool(parse_docstring=True)
 async def fetch_tasks(
     config: Annotated[RunnableConfig, InjectedToolArg()],
-    status: Optional[str] = None,
+    status: Optional[str] = "ACTIVE",
     quadrant: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> Dict[str, Any]:
     """List tasks for the user with optional filters.
 
-    Use this tool to retrieve tasks for a user. You can filter by status
-    (ACTIVE, COMPLETED, DELETED) or eisenhower quadrant (Q1, Q2, Q3, Q4).
+    Use this tool to retrieve tasks for a user. By default, returns only ACTIVE tasks.
+    You can filter by status (ACTIVE, COMPLETED, DELETED) or eisenhower quadrant (Q1, Q2, Q3, Q4).
+    To get all tasks including completed ones, explicitly set status=None.
     Results are paginated with limit and offset.
 
     Args:
-        status: Optional task status filter (ACTIVE, COMPLETED, DELETED)
+        status: Task status filter (ACTIVE, COMPLETED, DELETED). Defaults to ACTIVE.
+               Set to None to fetch all tasks regardless of status.
         quadrant: Optional eisenhower quadrant filter (Q1, Q2, Q3, Q4)
         limit: Maximum number of tasks to return (default: 50, max: 200)
         offset: Number of tasks to skip for pagination (default: 0)

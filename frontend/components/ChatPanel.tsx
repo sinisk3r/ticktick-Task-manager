@@ -28,6 +28,8 @@ import { ExportChatDialog } from "@/components/ExportChatDialog";
 import { ChatTaskCard } from "@/components/ChatTaskCard";
 import { Task } from "@/types/task";
 import { api } from "@/lib/api";
+import { ErrorCard } from "@/components/ErrorCard";
+import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
 
 const escapeHtml = (value: string) =>
     value
@@ -550,6 +552,7 @@ const MessageBubble = ({
     pendingAction,
     onConfirm,
     onCancel,
+    onViewErrorDetails,
 }: {
     message: AgentMessage;
     showThinking?: boolean;
@@ -558,6 +561,7 @@ const MessageBubble = ({
     pendingAction: PendingAction | null;
     onConfirm: () => void;
     onCancel: () => void;
+    onViewErrorDetails?: () => void;
 }) => {
     const isAssistant = message.role === "assistant";
     const [collapsed, setCollapsed] = useState(false);
@@ -607,14 +611,25 @@ const MessageBubble = ({
                                 </div>
                             </div>
                         ) : null}
-                        {/* Render events chronologically, interleaving text and tool calls */}
-                        {renderChronologicalEvents(message.events, message.content, isStreaming, message.payload)}
-                        <AgentTimeline
-                            events={message.events}
-                            pendingAction={pendingAction}
-                            onConfirm={onConfirm}
-                            onCancel={onCancel}
-                        />
+                        {/* Check if this is an error message */}
+                        {message.payload?.error ? (
+                            <ErrorCard
+                                error={message.content}
+                                errorData={message.payload?.errorData}
+                                onViewDetails={onViewErrorDetails}
+                            />
+                        ) : (
+                            <>
+                                {/* Render events chronologically, interleaving text and tool calls */}
+                                {renderChronologicalEvents(message.events, message.content, isStreaming, message.payload)}
+                                <AgentTimeline
+                                    events={message.events}
+                                    pendingAction={pendingAction}
+                                    onConfirm={onConfirm}
+                                    onCancel={onCancel}
+                                />
+                            </>
+                        )}
                     </div>
                 ) : (
                     message.content
@@ -629,6 +644,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
         messages,
         isStreaming,
         error,
+        errorData,
         thinking,
         pendingAction,
         sendGoal,
@@ -639,6 +655,8 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
     const [input, setInput] = useState("");
     const [devMode, setDevMode] = useState(false);
     const [showExportDialog, setShowExportDialog] = useState(false);
+    const [showErrorDialog, setShowErrorDialog] = useState(false);
+    const [errorDialogData, setErrorDialogData] = useState<{ error: string; errorData?: Record<string, any> } | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
     // Listen for dev mode changes
@@ -749,6 +767,13 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                                     pendingAction={isLastAssistant ? pendingAction : null}
                                     onConfirm={() => executePending("confirm")}
                                     onCancel={() => executePending("cancel")}
+                                    onViewErrorDetails={() => {
+                                        setErrorDialogData({
+                                            error: msg.content,
+                                            errorData: msg.payload?.errorData,
+                                        });
+                                        setShowErrorDialog(true);
+                                    }}
                                 />
                             );
                         })}
@@ -773,11 +798,6 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                 )}
             </div>
 
-            {error ? (
-                <div className="px-4 py-2 text-sm text-destructive border-t border-b bg-destructive/10">
-                    {error}
-                </div>
-            ) : null}
 
             <footer className="p-4 border-t">
                 <div className="flex flex-col gap-2">
@@ -813,6 +833,16 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                 isOpen={showExportDialog}
                 onClose={() => setShowExportDialog(false)}
                 messages={messages}
+            />
+
+            <ErrorDetailsDialog
+                isOpen={showErrorDialog}
+                onClose={() => {
+                    setShowErrorDialog(false);
+                    setErrorDialogData(null);
+                }}
+                error={errorDialogData?.error || error || ""}
+                errorData={errorDialogData?.errorData || errorData || undefined}
             />
         </aside>
     );

@@ -1,6 +1,7 @@
 """
 API endpoints for managing LLM configurations.
 """
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,8 @@ from app.core.database import get_db
 from app.core.llm_config import get_llm_settings, DEFAULT_MODELS
 from app.models import LLMConfiguration, LLMProvider, Settings
 from app.services.llm_test import test_llm_connection
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/llm-configurations", tags=["LLM Configurations"])
@@ -498,6 +501,19 @@ async def set_active_configuration(
         settings.active_llm_config_id = config_id
     
     await db.commit()
+    # Refresh to ensure relationship is loaded
+    await db.refresh(settings, ["active_llm_config"])
+    
+    # Log the change for debugging
+    if settings.active_llm_config:
+        logger.info(
+            f"Active LLM config updated for user_id={user_id}: "
+            f"config_id={config_id}, "
+            f"provider={settings.active_llm_config.provider.value}, "
+            f"model={settings.active_llm_config.model}"
+        )
+    else:
+        logger.warning(f"Active LLM config set to {config_id} but relationship not loaded for user_id={user_id}")
     
     return {"message": "Configuration set as active", "config_id": config_id}
 
