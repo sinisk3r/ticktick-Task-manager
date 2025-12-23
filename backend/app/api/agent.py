@@ -1,9 +1,13 @@
 """
 Agent SSE endpoints for tool-planning and execution.
+
+Chat UX v2: Supports both legacy agent (graph.py) and new personalized agent (main_agent.py).
+Use 'use_v2_agent' flag in request to enable Chat UX v2 features.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -15,14 +19,91 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.store.postgres import AsyncPostgresStore
 
 from app.agent.graph import create_agent
+from app.agent.main_agent import create_context_agent
 from app.agent import tools as agent_tools
 from app.core.database import get_db
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+# Global instances for Chat UX v2 persistent memory
+# Created once at first use, reused across requests to prevent connection leaks
+_checkpointer: Optional[AsyncPostgresSaver] = None
+_store: Optional[AsyncPostgresStore] = None
+_checkpointer_lock = asyncio.Lock()
+_store_lock = asyncio.Lock()
+
+
+async def get_checkpointer() -> AsyncPostgresSaver:
+    """
+    Get or create global AsyncPostgresSaver instance.
+
+    This singleton pattern ensures we reuse database connections instead of
+    creating new ones for each request, preventing connection pool exhaustion.
+
+    Returns:
+        Initialized AsyncPostgresSaver instance with tables created
+    """
+    global _checkpointer
+
+    if _checkpointer is None:
+        async with _checkpointer_lock:
+            # Double-check after acquiring lock
+            if _checkpointer is None:
+                logger.info("Initializing global AsyncPostgresSaver for Chat UX v2")
+
+                # Convert SQLAlchemy asyncpg URL to PostgreSQL URL
+                pg_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+                # Enter async context manager and keep it open
+                cm = AsyncPostgresSaver.from_conn_string(pg_url)
+                _checkpointer = await cm.__aenter__()
+
+                # Create database tables if they don't exist
+                await _checkpointer.setup()
+
+                logger.info("AsyncPostgresSaver initialized and ready")
+
+    return _checkpointer
+
+
+async def get_store() -> AsyncPostgresStore:
+    """
+    Get or create global AsyncPostgresStore instance.
+
+    This singleton pattern ensures we reuse database connections instead of
+    creating new ones for each request, preventing connection pool exhaustion.
+
+    Returns:
+        Initialized AsyncPostgresStore instance with tables created
+    """
+    global _store
+
+    if _store is None:
+        async with _store_lock:
+            # Double-check after acquiring lock
+            if _store is None:
+                logger.info("Initializing global AsyncPostgresStore for Chat UX v2")
+
+                # Convert SQLAlchemy asyncpg URL to PostgreSQL URL
+                pg_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+                # Enter async context manager and keep it open
+                cm = AsyncPostgresStore.from_conn_string(pg_url)
+                _store = await cm.__aenter__()
+
+                # Create database tables if they don't exist
+                await _store.setup()
+
+                logger.info("AsyncPostgresStore initialized and ready")
+
+    return _store
 
 
 class StreamRequest(BaseModel):
@@ -33,6 +114,10 @@ class StreamRequest(BaseModel):
     messages: Optional[List[Dict[str, str]]] = Field(
         default=None,
         description="Conversation history (list of {role: 'user'|'assistant', content: str})"
+    )
+    use_v2_agent: bool = Field(
+        default=False,
+        description="Use Chat UX v2 agent with personalization and persistent memory"
     )
 
 
@@ -58,11 +143,25 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
     async def event_generator():
         try:
             # Create LangGraph agent with conversation memory
-            # The create_agent function handles:
-            # - LLM provider initialization (via get_llm_for_user with user settings)
-            # - Tool binding with user_id and db injection
-            # - MemorySaver checkpointer for conversation history
-            agent = await create_agent(user_id=payload.user_id, db=db)
+            # Choose between legacy agent (graph.py) or Chat UX v2 agent (main_agent.py)
+            if payload.use_v2_agent:
+                # Chat UX v2: Personalized agent with AsyncPostgresStore memory
+                logger.info(f"Using Chat UX v2 agent for user_id={payload.user_id}")
+
+                # Get or create global checkpointer/store instances
+                checkpointer = await get_checkpointer()
+                store = await get_store()
+
+                agent = await create_context_agent(
+                    user_id=payload.user_id,
+                    db=db,
+                    checkpointer=checkpointer,
+                    store=store,
+                )
+            else:
+                # Legacy agent: MemorySaver checkpointer (in-memory)
+                logger.info(f"Using legacy agent for user_id={payload.user_id}")
+                agent = await create_agent(user_id=payload.user_id, db=db)
 
             # Build conversation history from frontend
             messages = []

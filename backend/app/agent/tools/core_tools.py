@@ -10,11 +10,13 @@ We use Annotated with InjectedToolArg to hide it from schema generation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Dict, List, Optional
 import json
 from pathlib import Path
+from weakref import WeakKeyDictionary
 
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.runnables import RunnableConfig
@@ -28,6 +30,17 @@ from app.services.prompt_utils import build_profile_context
 from app.services.wellbeing_service import WellbeingService
 
 logger = logging.getLogger(__name__)
+
+# Per-session locks to serialize database commits
+# Uses WeakKeyDictionary to avoid keeping sessions alive
+_session_locks: WeakKeyDictionary[AsyncSession, asyncio.Lock] = WeakKeyDictionary()
+
+
+def _get_session_lock(db: AsyncSession) -> asyncio.Lock:
+    """Get or create a lock for a database session."""
+    if db not in _session_locks:
+        _session_locks[db] = asyncio.Lock()
+    return _session_locks[db]
 
 
 # -----------------------------------------------------------------------------
@@ -81,21 +94,21 @@ def task_to_payload(task: Task) -> Dict[str, Any]:
 @tool(parse_docstring=True)
 async def fetch_tasks(
     config: Annotated[RunnableConfig, InjectedToolArg()],
-    status: Optional[str] = "ACTIVE",
+    status: Optional[str] = "active",
     quadrant: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> Dict[str, Any]:
     """List tasks for the user with optional filters.
 
-    Use this tool to retrieve tasks for a user. By default, returns only ACTIVE tasks.
-    You can filter by status (ACTIVE, COMPLETED, DELETED) or eisenhower quadrant (Q1, Q2, Q3, Q4).
+    Use this tool to retrieve tasks for a user. By default, returns only active tasks.
+    You can filter by status (active, completed, deleted) or eisenhower quadrant (Q1, Q2, Q3, Q4).
     To get all tasks including completed ones, explicitly set status=None.
     Results are paginated with limit and offset.
 
     Args:
-        status: Task status filter (ACTIVE, COMPLETED, DELETED). Defaults to ACTIVE.
-               Set to None to fetch all tasks regardless of status.
+        status: Task status filter (active, completed, deleted). Defaults to active.
+               Case-insensitive. Set to None to fetch all tasks regardless of status.
         quadrant: Optional eisenhower quadrant filter (Q1, Q2, Q3, Q4)
         limit: Maximum number of tasks to return (default: 50, max: 200)
         offset: Number of tasks to skip for pagination (default: 0)
@@ -116,13 +129,14 @@ async def fetch_tasks(
     try:
         query = select(Task).where(Task.user_id == user_id)
 
-        # Parse status enum if provided
+        # Parse status enum if provided (case-insensitive)
         if status:
             try:
-                status_enum = TaskStatus(status)
+                status_normalized = status.lower().strip()
+                status_enum = TaskStatus(status_normalized)
                 query = query.where(Task.status == status_enum)
             except ValueError:
-                logger.warning(f"Invalid status value '{status}' provided to fetch_tasks, ignoring")
+                logger.warning(f"Invalid status value '{status}' provided to fetch_tasks, ignoring filter")
 
         # Parse quadrant enum if provided
         if quadrant:
@@ -274,8 +288,11 @@ async def create_task(
         is_sorted=False,
     )
     db.add(task)
-    await db.commit()
-    await db.refresh(task)
+    # Use lock to serialize commits when multiple tools run concurrently
+    lock = _get_session_lock(db)
+    async with lock:
+        await db.commit()
+        await db.refresh(task)
 
     logger.info("Agent created task %s for user %s", task.id, user_id)
 
@@ -391,8 +408,11 @@ async def update_task(
         }
 
     task.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(task)
+    # Use lock to serialize commits when multiple tools run concurrently
+    lock = _get_session_lock(db)
+    async with lock:
+        await db.commit()
+        await db.refresh(task)
 
     logger.info("Agent updated task %s for user %s: %s", task.id, user_id, ", ".join(changes))
 
@@ -436,8 +456,11 @@ async def complete_task(
     task.status = TaskStatus.COMPLETED
     task.updated_at = datetime.utcnow()
 
-    await db.commit()
-    await db.refresh(task)
+    # Use lock to serialize commits when multiple tools run concurrently
+    lock = _get_session_lock(db)
+    async with lock:
+        await db.commit()
+        await db.refresh(task)
 
     logger.info("Agent completed task %s for user %s", task.id, user_id)
 
@@ -483,17 +506,20 @@ async def delete_task(
 
     task_title = task.title
 
-    if soft_delete:
-        task.status = TaskStatus.DELETED
-        task.updated_at = datetime.utcnow()
-        await db.commit()
-        summary = f"Soft-deleted task '{task_title}'"
-        logger.info("Agent soft-deleted task %s for user %s", task_id, user_id)
-    else:
-        await db.delete(task)
-        await db.commit()
-        summary = f"Deleted task '{task_title}'"
-        logger.info("Agent hard-deleted task %s for user %s", task_id, user_id)
+    # Use lock to serialize commits when multiple tools run concurrently
+    lock = _get_session_lock(db)
+    async with lock:
+        if soft_delete:
+            task.status = TaskStatus.DELETED
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            summary = f"Soft-deleted task '{task_title}'"
+            logger.info("Agent soft-deleted task %s for user %s", task_id, user_id)
+        else:
+            await db.delete(task)
+            await db.commit()
+            summary = f"Deleted task '{task_title}'"
+            logger.info("Agent hard-deleted task %s for user %s", task_id, user_id)
 
     return {"summary": summary, "task_id": task_id}
 

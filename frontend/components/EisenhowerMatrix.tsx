@@ -23,6 +23,7 @@ import {
 } from "@dnd-kit/sortable"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -660,7 +661,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             fetchTasks() // Fetch tasks in uncontrolled mode
           }
         }}
-        onRefresh={controlled && onTasksUpdate ? onTasksUpdate : fetchTasks}
+        onRefresh={async () => { controlled && onTasksUpdate ? await onTasksUpdate() : fetchTasks(); }}
       />
 
       {savingTaskId && (

@@ -85,6 +85,7 @@ export default function MainLayout({
                             onClose={() => setIsChatOpen(false)}
                             isMobile={isMobile}
                             context={{ pathname }}
+                            userId={1} // TODO: Get from auth context when authentication is implemented
                         />
                     </div>
                 </div>

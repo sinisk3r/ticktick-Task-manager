@@ -22,6 +22,8 @@ interface ExportOptions {
     includeDurations: boolean;
     includeBrowserInfo: boolean;
     format: "markdown" | "json" | "both";
+    condensedMode: boolean;
+    maxPayloadSize: number;
 }
 
 interface ExportChatDialogProps {
@@ -38,11 +40,13 @@ export function ExportChatDialog({ isOpen, onClose, messages }: ExportChatDialog
         includeDurations: true,
         includeBrowserInfo: true,
         format: "markdown",
+        condensedMode: false,
+        maxPayloadSize: 2000,
     });
     const [exporting, setExporting] = useState(false);
     const [copied, setCopied] = useState(false);
 
-    const toggleOption = (key: keyof Omit<ExportOptions, "format">) => {
+    const toggleOption = (key: keyof Omit<ExportOptions, "format" | "maxPayloadSize">) => {
         setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
     };
 
@@ -67,6 +71,36 @@ export function ExportChatDialog({ isOpen, onClose, messages }: ExportChatDialog
         if (ms < 1000) return `${ms}ms`;
         if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
         return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+    };
+
+    // Summarize tool results for condensed mode
+    const summarizeToolResult = (result: unknown): string => {
+        if (!result) return "No result";
+        if (typeof result === "string") {
+            try {
+                const parsed = JSON.parse(result);
+                return summarizeToolResult(parsed);
+            } catch {
+                return result.length > 100 ? result.slice(0, 100) + "..." : result;
+            }
+        }
+        if (typeof result !== "object") return String(result);
+        const r = result as Record<string, unknown>;
+        if (r.summary && typeof r.summary === "string") return r.summary;
+        if (r.tasks && Array.isArray(r.tasks)) return `${r.tasks.length} task(s) returned`;
+        if (r.task && typeof r.task === "object") {
+            const task = r.task as Record<string, unknown>;
+            return `Task: ${task.title || task.id}`;
+        }
+        if (r.error) return `Error: ${r.error}`;
+        return "Result available";
+    };
+
+    // Truncate large payloads
+    const truncatePayload = (payload: unknown, maxSize: number): string => {
+        const str = JSON.stringify(payload, null, 2);
+        if (str.length <= maxSize) return str;
+        return str.slice(0, maxSize) + `\n... [Truncated ${str.length - maxSize} chars]`;
     };
 
     const generateMarkdown = () => {
@@ -159,10 +193,16 @@ export function ExportChatDialog({ isOpen, onClose, messages }: ExportChatDialog
                         }
 
                         if (event.type === "tool_result" && event.data.result) {
-                            const resultStr = typeof event.data.result === "string"
-                                ? event.data.result
-                                : JSON.stringify(event.data.result);
-                            lines.push(`  - Result: ${resultStr}`);
+                            if (options.condensedMode) {
+                                // Condensed: show summary only
+                                lines.push(`  - Result: ${summarizeToolResult(event.data.result)}`);
+                            } else {
+                                // Full: show truncated result
+                                const resultStr = typeof event.data.result === "string"
+                                    ? event.data.result
+                                    : truncatePayload(event.data.result, options.maxPayloadSize);
+                                lines.push(`  - Result: ${resultStr}`);
+                            }
                         }
 
                         if (event.type === "error" && event.data.error) {
@@ -395,6 +435,22 @@ export function ExportChatDialog({ isOpen, onClose, messages }: ExportChatDialog
                                     <div className="text-sm font-medium">Browser Environment</div>
                                     <div className="text-xs text-muted-foreground">
                                         User agent, platform, screen size, timezone
+                                    </div>
+                                </div>
+                            </label>
+
+                            <label className="flex items-start gap-3 cursor-pointer">
+                                <Checkbox
+                                    checked={options.condensedMode}
+                                    onCheckedChange={() => toggleOption("condensedMode")}
+                                />
+                                <div className="flex-1">
+                                    <div className="text-sm font-medium flex items-center gap-2">
+                                        Condensed Mode
+                                        <Badge variant="secondary" className="text-[10px]">Debug</Badge>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        Summarize tool results instead of full JSON payloads
                                     </div>
                                 </div>
                             </label>

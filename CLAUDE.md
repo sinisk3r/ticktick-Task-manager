@@ -432,17 +432,71 @@ Detailed documentation is in the `docs/` folder:
 - `docs/FEATURES.md` - Feature specifications
 - `docs/API_INTEGRATION.md` - TickTick OAuth setup guide
 
+---
+
+## ACTIVE WORK: Chat UX v2 (Seamless Assistant)
+
+> **Note to Future Claude:** Once this work is complete, update this CLAUDE.md to:
+> 1. Remove this section and the plan file links
+> 2. Update the Architecture section to reflect the new `create_agent` + middleware pattern
+> 3. Update Agent System section with new tools and memory persistence
+> 4. Add new API endpoints (notifications, etc.) to the Key API Endpoints section
+
+### Overview
+
+Major upgrade to transform the chat into a seamless personal assistant that learns user preferences, adapts tone, and proactively helps with task management.
+
+### Key Plan Documents
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/Chat_UX_v2.md`](docs/Chat_UX_v2.md) | Full feature specification and implementation phases |
+| [`docs/PARALLEL_EXECUTION_PLAN.md`](docs/PARALLEL_EXECUTION_PLAN.md) | Multi-agent parallelization strategy |
+
+### Architecture Changes (In Progress)
+
+**Current → Target:**
+```
+create_react_agent (deprecated)  →  create_agent + middleware (LangChain v1)
+MemorySaver (in-memory)          →  AsyncPostgresSaver (persistent)
+No cross-thread memory           →  AsyncPostgresStore (user preferences)
+Static system prompt             →  @dynamic_prompt middleware (personalized)
+```
+
+### New Components Being Added
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Main Agent | `agent/main_agent.py` | LangChain v1 `create_agent` with middleware |
+| Middleware | `agent/middleware.py` | `@dynamic_prompt` for tone/preference injection |
+| State Schema | `agent/state.py` | Custom state with user context |
+| Memory Store | `agent/memory/store.py` | PostgresStore wrapper |
+| Planning Tools | `agent/tools/planning_tools.py` | `prioritize_day`, `suggest_task_order` |
+| Memory Tools | `agent/tools/memory_tools.py` | `store_preference`, `get_context` |
+| Notifications | `api/notifications.py` | SSE endpoint for proactive reminders |
+
+### Parallel Workstreams
+
+- **Stream A:** Database models & migrations
+- **Stream B:** Agent core & middleware
+- **Stream C:** New tools (planning, memory)
+- **Stream D:** API layer integration
+- **Stream E:** Frontend notifications
+
+See `docs/PARALLEL_EXECUTION_PLAN.md` for file ownership and execution order.
+
+### Key Dependencies
+
+```bash
+# Required for this work
+langgraph-checkpoint-postgres==3.0.2
+psycopg[binary,pool]
+```
+
+---
+
 ## Development Principles
 
 - **No Secrets in Git:** This is a public project - never commit API keys, tokens, or credentials
 - **Feedback-Driven:** Prioritize quick iterations and user feedback over perfection
-- **Use Context7:** Always use Context7 MCP for library documentation and code generation assistance
-
-## Remediation Log (Qwen3 / Ollama)
-- **Issue 1:** Qwen3 returned empty `content` while JSON landed in `thinking` when `format:"json"` was used.
-  - **Fix:** Send requests with `think:false` (keep `format:"json"`); fallback to `thinking` only if ever returned.
-- **Issue 2:** qwen3:4b echoed back complex JSON prompts instead of generating tool plans (Dec 12, 2025)
-  - **Root Cause:** Small model treats nested JSON input as schema to copy, not instructions
-  - **Fix:** Upgraded to qwen3:8b which handles complex JSON correctly
-  - **Config:** `OLLAMA_MODEL=qwen3:8b` in `backend/.env`
-  - **Trade-off:** ~50% slower but fully functional for tool calling
+- **Use Langgraph/LangChain MCP and Context7 MCP:** Always use LangChain MCP for Langchain and other details, and Context7 MCP for library documentation and code generation assistance

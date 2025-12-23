@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
     AgentEvent,
@@ -30,6 +31,8 @@ import { Task } from "@/types/task";
 import { api } from "@/lib/api";
 import { ErrorCard } from "@/components/ErrorCard";
 import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
+import { useNotifications } from "@/lib/useNotifications";
+import { NotificationToast } from "@/components/NotificationToast";
 
 const escapeHtml = (value: string) =>
     value
@@ -46,6 +49,55 @@ const renderMarkdownLite = (value: string) => {
     html = html.replace(/`(.+?)`/g, "<code>$1</code>");
     html = html.replace(/\n/g, "<br>");
     return html;
+};
+
+// Lazy-loading task card for when task data isn't immediately available
+const LazyTaskCard = ({ taskId }: { taskId: number }) => {
+    const [task, setTask] = useState<Task | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const fetchTask = async () => {
+            try {
+                const fetchedTask = await api.get<Task>(`/api/tasks/${taskId}`);
+                if (mounted && fetchedTask) {
+                    setTask(fetchedTask);
+                }
+            } catch (e) {
+                console.warn(`[LazyTaskCard] Failed to fetch task ${taskId}:`, e);
+                if (mounted) setError(true);
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+
+        fetchTask();
+        return () => { mounted = false; };
+    }, [taskId]);
+
+    if (loading) {
+        return (
+            <Card className="p-3 border-l-4 border-l-gray-400 bg-muted/40">
+                <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Loading task #{taskId}...</span>
+                </div>
+            </Card>
+        );
+    }
+
+    if (error || !task) {
+        return (
+            <Card className="p-3 border-l-4 border-l-gray-400 bg-muted/40">
+                <span className="text-sm text-muted-foreground">Task #{taskId}</span>
+            </Card>
+        );
+    }
+
+    return <ChatTaskCard task={task} />;
 };
 
 // Parse task references from message content
@@ -265,19 +317,28 @@ const renderChronologicalEvents = (
         tasksIsArray: Array.isArray(messagePayload?.tasks),
     });
     
-    const tasksFromPayload = messagePayload?.tasks 
+    const tasksFromPayload = messagePayload?.tasks
         ? (Array.isArray(messagePayload.tasks) ? messagePayload.tasks : [messagePayload.tasks])
         : [];
-    
-    const allTasks = [...tasksFromEvents, ...tasksFromMessageEvents, ...tasksFromPayload];
-    
+
+    // Deduplicate tasks by ID when merging from all sources
+    const seenTaskIds = new Set<number>();
+    const allTasks: Task[] = [];
+
+    for (const task of [...tasksFromEvents, ...tasksFromMessageEvents, ...tasksFromPayload]) {
+        if (task?.id && !seenTaskIds.has(task.id)) {
+            seenTaskIds.add(task.id);
+            allTasks.push(task as Task);
+        }
+    }
+
     console.log("[ChatPanel] All extracted tasks summary:", {
         fromEvents: tasksFromEvents.length,
         fromMessageEvents: tasksFromMessageEvents.length,
         fromPayload: tasksFromPayload.length,
-        total: allTasks.length,
+        uniqueTotal: allTasks.length,
     });
-    
+
     // Create a map of task ID to task data for quick lookup
     const taskMap = new Map<number, Task>();
     for (const task of allTasks) {
@@ -389,11 +450,12 @@ const renderContentWithTasks = (content: string, taskMap: Map<number, Task>) => 
     const lines = content.split('\n');
     const parts: React.ReactNode[] = [];
     let hasRenderedTasks = false;
-    
+    const renderedTaskIds = new Set<number>(); // Track rendered tasks to avoid duplicates
+
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
         const line = lines[lineIdx];
         const lineTaskRefs = parseTaskReferences(line);
-        
+
         if (lineTaskRefs.length === 0) {
             // No task reference in this line, render as normal
             if (line.trim()) {
@@ -408,32 +470,33 @@ const renderContentWithTasks = (content: string, taskMap: Map<number, Task>) => 
                 );
             }
         } else {
-            // This line contains task references - replace the entire line with task cards
+            // This line contains task references - replace with task cards (deduplicated)
             for (const taskRef of lineTaskRefs) {
+                // Skip if we've already rendered this task
+                if (renderedTaskIds.has(taskRef.id)) {
+                    continue;
+                }
+
                 const task = taskMap.get(taskRef.id);
-                
+
                 if (task) {
-                    // Replace the list item with a task card
+                    // Mark as rendered and add the task card
+                    renderedTaskIds.add(taskRef.id);
                     hasRenderedTasks = true;
                     parts.push(
-                        <div key={`task-${taskRef.id}-${lineIdx}`} className="my-2">
+                        <div key={`task-${taskRef.id}`} className="my-2">
                             <ChatTaskCard task={task} />
                         </div>
                     );
                 } else {
-                    console.warn("[ChatPanel] Task not found in map:", taskRef.id);
-                    // Task not found in map, render line as-is (but only once per line)
-                    if (taskRef === lineTaskRefs[0] && line.trim()) {
-                        parts.push(
-                            <div
-                                key={`line-${lineIdx}`}
-                                className="prose prose-invert prose-p:my-0 prose-ul:my-1 prose-li:my-0 prose-li:marker:text-muted-foreground/80 text-sm"
-                                dangerouslySetInnerHTML={{
-                                    __html: renderMarkdownLite(line + (lineIdx < lines.length - 1 ? '\n' : '')),
-                                }}
-                            />
-                        );
-                    }
+                    // Task not in map - use lazy loading to fetch it
+                    renderedTaskIds.add(taskRef.id);
+                    hasRenderedTasks = true;
+                    parts.push(
+                        <div key={`lazy-task-${taskRef.id}`} className="my-2">
+                            <LazyTaskCard taskId={taskRef.id} />
+                        </div>
+                    );
                 }
             }
         }
@@ -542,6 +605,7 @@ interface ChatPanelProps {
     onClose: () => void;
     isMobile?: boolean;
     context?: Record<string, unknown>;
+    userId?: number | null;
 }
 
 const MessageBubble = ({
@@ -639,7 +703,7 @@ const MessageBubble = ({
     );
 };
 
-export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps) {
+export function ChatPanel({ isOpen, onClose, isMobile, context, userId }: ChatPanelProps) {
     const {
         messages,
         isStreaming,
@@ -658,6 +722,12 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
     const [showErrorDialog, setShowErrorDialog] = useState(false);
     const [errorDialogData, setErrorDialogData] = useState<{ error: string; errorData?: Record<string, any> } | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
+
+    // Notification system integration
+    const { notifications, clearNotification, isConnected } = useNotifications(
+        userId || null,
+        isOpen && !!userId // Only enable when chat is open and userId is available
+    );
 
     // Listen for dev mode changes
     useEffect(() => {
@@ -688,7 +758,7 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
         if (!input.trim()) return;
         const toSend = input;
         setInput("");
-        await sendGoal(toSend, { context });
+        await sendGoal(toSend, { context, userId: userId || 1 });
     };
 
     const panelClass = cn(
@@ -844,6 +914,20 @@ export function ChatPanel({ isOpen, onClose, isMobile, context }: ChatPanelProps
                 error={errorDialogData?.error || error || ""}
                 errorData={errorDialogData?.errorData || errorData || undefined}
             />
+
+            {/* Notification Toasts */}
+            {notifications.map((notification, index) => (
+                <NotificationToast
+                    key={`${notification.type}-${notification.timestamp}-${index}`}
+                    notification={notification}
+                    onDismiss={() => clearNotification(index)}
+                    onView={() => {
+                        // Navigate to matrix view with filter based on notification type
+                        const filter = notification.type === 'overdue' ? 'overdue' : 'upcoming';
+                        window.location.href = `/matrix?filter=${filter}`;
+                    }}
+                />
+            ))}
         </aside>
     );
 }

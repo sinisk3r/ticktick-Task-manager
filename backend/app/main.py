@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.services import OllamaService
-from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations, strategy_config
+from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations, strategy_config, notifications
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +40,21 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     print("Shutting down Context API...")
+
+    # Clean up Chat UX v2 persistent memory connections
+    from app.api.agent import _checkpointer, _store
+    if _checkpointer:
+        try:
+            print("Closing AsyncPostgresSaver connection...")
+            await _checkpointer.__aexit__(None, None, None)
+        except Exception as e:
+            print(f"Error closing checkpointer: {e}")
+    if _store:
+        try:
+            print("Closing AsyncPostgresStore connection...")
+            await _store.__aexit__(None, None, None)
+        except Exception as e:
+            print(f"Error closing store: {e}")
 
 
 app = FastAPI(
@@ -86,6 +101,7 @@ app.include_router(chat.router)
 app.include_router(agent.router)
 app.include_router(llm_configurations.router)
 app.include_router(strategy_config.router)
+app.include_router(notifications.router)
 
 
 # Request/Response models

@@ -13,3 +13,5 @@ langgraph-prebuilt==1.0.5
 langgraph-sdk==0.3.1
 langsmith==0.5.0
 ollama==0.6.1
+langgraph-checkpoint-postgres==3.0.2
+psycopg[binary,pool]
