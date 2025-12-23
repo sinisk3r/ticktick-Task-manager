@@ -13,12 +13,14 @@ import logging
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
 
@@ -36,11 +38,120 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 # Created once at first use, reused across requests to prevent connection leaks
 _checkpointer: Optional[AsyncPostgresSaver] = None
 _store: Optional[AsyncPostgresStore] = None
+_checkpointer_cm: Optional[Any] = None  # Store the context manager to keep it alive
+_store_cm: Optional[Any] = None  # Store the context manager to keep it alive
 _checkpointer_lock = asyncio.Lock()
 _store_lock = asyncio.Lock()
+_checkpointer_init_failed = False
+_store_init_failed = False
+
+# Configuration: Set to True to disable persistent memory if initialization fails
+DISABLE_MEMORY_ON_INIT_FAILURE = True
+
+# Configuration: Disable persistent memory entirely (avoids connection issues with AsyncPostgresSaver)
+# Set to False to re-enable persistent memory when connection issues are resolved
+DISABLE_PERSISTENT_MEMORY_TEMPORARILY = True
 
 
-async def get_checkpointer() -> AsyncPostgresSaver:
+async def _check_checkpoint_tables_exist(pg_url: str) -> bool:
+    """
+    Check if checkpoint tables already exist in the database.
+    
+    This allows us to skip setup() if tables exist, avoiding hangs
+    on stuck index creation operations.
+    """
+    try:
+        import psycopg
+        conn = await psycopg.AsyncConnection.connect(pg_url)
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name IN ('checkpoints', 'checkpoint_writes', 'checkpoint_blobs', 'checkpoint_migrations')
+                """)
+                result = await cur.fetchone()
+                if result and result[0] is not None:
+                    return result[0] >= 4  # All 4 tables should exist
+                return False
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to check checkpoint tables: {e}, will try setup()")
+        return False
+
+
+async def _check_store_tables_exist(pg_url: str) -> bool:
+    """
+    Check if store tables already exist in the database.
+    
+    This allows us to skip setup() if tables exist, avoiding hangs
+    on stuck index creation operations.
+    """
+    try:
+        import psycopg
+        conn = await psycopg.AsyncConnection.connect(pg_url)
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name IN ('store', 'store_migrations')
+                """)
+                result = await cur.fetchone()
+                if result and result[0] is not None:
+                    return result[0] >= 2  # Both tables should exist
+                return False
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to check store tables: {e}, will try setup()")
+        return False
+
+
+def _format_pg_url_for_langgraph(db_url: str) -> str:
+    """
+    Convert SQLAlchemy asyncpg URL to PostgreSQL URL format expected by LangGraph.
+    
+    LangGraph uses psycopg3 which expects:
+    - postgresql:// (not postgresql+asyncpg://)
+    - SSL parameters in query string (sslmode=disable for local dev)
+    
+    Args:
+        db_url: SQLAlchemy database URL (e.g., postgresql+asyncpg://user:pass@host:port/db)
+        
+    Returns:
+        PostgreSQL connection string for LangGraph
+    """
+    # Replace asyncpg driver
+    pg_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+    
+    # Parse URL to add SSL parameters if not present
+    parsed = urlparse(pg_url)
+    query_params = parse_qs(parsed.query)
+    
+    # Add sslmode=disable for local development if not specified
+    if "sslmode" not in query_params:
+        query_params["sslmode"] = ["disable"]
+    
+    # Reconstruct URL with updated query
+    new_query = urlencode(query_params, doseq=True)
+    formatted_url = urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        new_query,
+        parsed.fragment
+    ))
+    
+    logger.debug(f"Formatted DB URL for LangGraph: {formatted_url.replace(parsed.password if parsed.password else '', '***')}")
+    return formatted_url
+
+
+async def get_checkpointer() -> Optional[AsyncPostgresSaver]:
     """
     Get or create global AsyncPostgresSaver instance.
 
@@ -48,32 +159,86 @@ async def get_checkpointer() -> AsyncPostgresSaver:
     creating new ones for each request, preventing connection pool exhaustion.
 
     Returns:
-        Initialized AsyncPostgresSaver instance with tables created
+        Initialized AsyncPostgresSaver instance with tables created, or None if initialization failed
     """
-    global _checkpointer
+    global _checkpointer, _checkpointer_init_failed
+
+    # If initialization previously failed and we're disabling memory, return None immediately
+    if _checkpointer_init_failed and DISABLE_MEMORY_ON_INIT_FAILURE:
+        logger.warning("AsyncPostgresSaver initialization previously failed, returning None")
+        return None
 
     if _checkpointer is None:
         async with _checkpointer_lock:
             # Double-check after acquiring lock
-            if _checkpointer is None:
-                logger.info("Initializing global AsyncPostgresSaver for Chat UX v2")
-
-                # Convert SQLAlchemy asyncpg URL to PostgreSQL URL
-                pg_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-
-                # Enter async context manager and keep it open
-                cm = AsyncPostgresSaver.from_conn_string(pg_url)
-                _checkpointer = await cm.__aenter__()
-
-                # Create database tables if they don't exist
-                await _checkpointer.setup()
-
-                logger.info("AsyncPostgresSaver initialized and ready")
+            if _checkpointer is None and not _checkpointer_init_failed:
+                try:
+                    logger.info("Step 1: Starting AsyncPostgresSaver initialization...")
+                    
+                    # Format connection string for LangGraph (add SSL params)
+                    pg_url = _format_pg_url_for_langgraph(settings.database_url)
+                    logger.info("Step 2: Connection string formatted")
+                    
+                    # Create context manager
+                    logger.info("Step 3: Creating AsyncPostgresSaver context manager...")
+                    cm = AsyncPostgresSaver.from_conn_string(pg_url)
+                    logger.info("Step 4: Context manager created, entering...")
+                    
+                    # Enter async context manager and keep it open
+                    # Store both the context manager and the instance to keep connection alive
+                    _checkpointer_cm = cm
+                    _checkpointer = await cm.__aenter__()
+                    logger.info("Step 5: Context manager entered successfully")
+                    
+                    # Check if tables already exist before calling setup()
+                    # This avoids hanging on stuck index creation operations
+                    logger.info("Step 6: Checking if checkpoint tables exist...")
+                    tables_exist = await _check_checkpoint_tables_exist(pg_url)
+                    
+                    if tables_exist:
+                        logger.info("Step 7: Checkpoint tables already exist, skipping setup()")
+                        logger.info("   (If indexes are missing, they will be created on-demand)")
+                    else:
+                        # Create database tables if they don't exist
+                        # Add timeout to prevent indefinite hanging
+                        logger.info("Step 7: Tables don't exist, calling setup() to create them...")
+                        try:
+                            await asyncio.wait_for(_checkpointer.setup(), timeout=30.0)
+                            logger.info("Step 8: setup() completed successfully")
+                        except asyncio.TimeoutError:
+                            logger.error("Step 8: setup() timed out after 30 seconds!")
+                            logger.warning("   This may be due to stuck index creation operations.")
+                            logger.warning("   Run: python scripts/fix_index_locks.py to fix stuck operations")
+                            # Clean up the context manager
+                            try:
+                                if _checkpointer_cm:
+                                    await _checkpointer_cm.__aexit__(None, None, None)
+                            except Exception as cleanup_error:
+                                logger.error(f"Error during cleanup: {cleanup_error}")
+                            _checkpointer = None
+                            _checkpointer_cm = None
+                            _checkpointer_init_failed = True
+                            if DISABLE_MEMORY_ON_INIT_FAILURE:
+                                logger.warning("AsyncPostgresSaver initialization failed, continuing without persistent memory")
+                                return None
+                            raise RuntimeError("AsyncPostgresSaver.setup() timed out after 30 seconds")
+                    
+                    logger.info("AsyncPostgresSaver initialized and ready")
+                    
+                except Exception as e:
+                    logger.exception(f"Failed to initialize AsyncPostgresSaver: {e}")
+                    _checkpointer = None
+                    _checkpointer_cm = None
+                    _checkpointer_init_failed = True
+                    if DISABLE_MEMORY_ON_INIT_FAILURE:
+                        logger.warning("AsyncPostgresSaver initialization failed, continuing without persistent memory")
+                        return None
+                    raise RuntimeError(f"AsyncPostgresSaver initialization failed: {e}") from e
 
     return _checkpointer
 
 
-async def get_store() -> AsyncPostgresStore:
+async def get_store() -> Optional[AsyncPostgresStore]:
     """
     Get or create global AsyncPostgresStore instance.
 
@@ -81,27 +246,81 @@ async def get_store() -> AsyncPostgresStore:
     creating new ones for each request, preventing connection pool exhaustion.
 
     Returns:
-        Initialized AsyncPostgresStore instance with tables created
+        Initialized AsyncPostgresStore instance with tables created, or None if initialization failed
     """
-    global _store
+    global _store, _store_init_failed
+
+    # If initialization previously failed and we're disabling memory, return None immediately
+    if _store_init_failed and DISABLE_MEMORY_ON_INIT_FAILURE:
+        logger.warning("AsyncPostgresStore initialization previously failed, returning None")
+        return None
 
     if _store is None:
         async with _store_lock:
             # Double-check after acquiring lock
-            if _store is None:
-                logger.info("Initializing global AsyncPostgresStore for Chat UX v2")
-
-                # Convert SQLAlchemy asyncpg URL to PostgreSQL URL
-                pg_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-
-                # Enter async context manager and keep it open
-                cm = AsyncPostgresStore.from_conn_string(pg_url)
-                _store = await cm.__aenter__()
-
-                # Create database tables if they don't exist
-                await _store.setup()
-
-                logger.info("AsyncPostgresStore initialized and ready")
+            if _store is None and not _store_init_failed:
+                try:
+                    logger.info("Step 1: Starting AsyncPostgresStore initialization...")
+                    
+                    # Format connection string for LangGraph (add SSL params)
+                    pg_url = _format_pg_url_for_langgraph(settings.database_url)
+                    logger.info("Step 2: Connection string formatted")
+                    
+                    # Create context manager
+                    logger.info("Step 3: Creating AsyncPostgresStore context manager...")
+                    cm = AsyncPostgresStore.from_conn_string(pg_url)
+                    logger.info("Step 4: Context manager created, entering...")
+                    
+                    # Enter async context manager and keep it open
+                    # Store both the context manager and the instance to keep connection alive
+                    _store_cm = cm
+                    _store = await cm.__aenter__()
+                    logger.info("Step 5: Context manager entered successfully")
+                    
+                    # Check if tables already exist before calling setup()
+                    # This avoids hanging on stuck index creation operations
+                    logger.info("Step 6: Checking if store tables exist...")
+                    tables_exist = await _check_store_tables_exist(pg_url)
+                    
+                    if tables_exist:
+                        logger.info("Step 7: Store tables already exist, skipping setup()")
+                        logger.info("   (If indexes are missing, they will be created on-demand)")
+                    else:
+                        # Create database tables if they don't exist
+                        # Add timeout to prevent indefinite hanging
+                        logger.info("Step 7: Tables don't exist, calling setup() to create them...")
+                        try:
+                            await asyncio.wait_for(_store.setup(), timeout=30.0)
+                            logger.info("Step 8: setup() completed successfully")
+                        except asyncio.TimeoutError:
+                            logger.error("Step 8: setup() timed out after 30 seconds!")
+                            logger.warning("   This may be due to stuck index creation operations.")
+                            logger.warning("   Run: python scripts/fix_index_locks.py to fix stuck operations")
+                            # Clean up the context manager
+                            try:
+                                if _store_cm:
+                                    await _store_cm.__aexit__(None, None, None)
+                            except Exception as cleanup_error:
+                                logger.error(f"Error during cleanup: {cleanup_error}")
+                            _store = None
+                            _store_cm = None
+                            _store_init_failed = True
+                            if DISABLE_MEMORY_ON_INIT_FAILURE:
+                                logger.warning("AsyncPostgresStore initialization failed, continuing without persistent memory")
+                                return None
+                            raise RuntimeError("AsyncPostgresStore.setup() timed out after 30 seconds")
+                    
+                    logger.info("AsyncPostgresStore initialized and ready")
+                    
+                except Exception as e:
+                    logger.exception(f"Failed to initialize AsyncPostgresStore: {e}")
+                    _store = None
+                    _store_cm = None
+                    _store_init_failed = True
+                    if DISABLE_MEMORY_ON_INIT_FAILURE:
+                        logger.warning("AsyncPostgresStore initialization failed, continuing without persistent memory")
+                        return None
+                    raise RuntimeError(f"AsyncPostgresStore initialization failed: {e}") from e
 
     return _store
 
@@ -149,8 +368,20 @@ async def stream_agent(payload: StreamRequest, db: AsyncSession = Depends(get_db
                 logger.info(f"Using Chat UX v2 agent for user_id={payload.user_id}")
 
                 # Get or create global checkpointer/store instances
-                checkpointer = await get_checkpointer()
-                store = await get_store()
+                # These may return None if initialization failed (with DISABLE_MEMORY_ON_INIT_FAILURE=True)
+                # TEMPORARY: Disable persistent memory until connection issue is fixed
+                if DISABLE_PERSISTENT_MEMORY_TEMPORARILY:
+                    logger.warning("Persistent memory temporarily disabled due to connection issues")
+                    checkpointer = None
+                    store = None
+                else:
+                    logger.info("Getting checkpointer instance...")
+                    checkpointer = await get_checkpointer()
+                    logger.info(f"Checkpointer: {'available' if checkpointer else 'disabled (init failed)'}")
+                    
+                    logger.info("Getting store instance...")
+                    store = await get_store()
+                    logger.info(f"Store: {'available' if store else 'disabled (init failed)'}")
 
                 agent = await create_context_agent(
                     user_id=payload.user_id,
@@ -363,7 +594,7 @@ async def execute_tool(payload: ExecuteRequest, db: AsyncSession = Depends(get_d
     tool = tool_map[payload.tool]
 
     # Build config with injected parameters
-    config = {
+    config: RunnableConfig = {
         "configurable": {
             "user_id": payload.user_id,
             "db": db,

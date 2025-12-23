@@ -42,19 +42,30 @@ async def lifespan(app: FastAPI):
     print("Shutting down Context API...")
 
     # Clean up Chat UX v2 persistent memory connections
-    from app.api.agent import _checkpointer, _store
-    if _checkpointer:
+    from app.api.agent import _checkpointer, _store, _checkpointer_cm, _store_cm
+    if _checkpointer_cm is not None:
         try:
             print("Closing AsyncPostgresSaver connection...")
-            await _checkpointer.__aexit__(None, None, None)
+            await _checkpointer_cm.__aexit__(None, None, None)
+            print("AsyncPostgresSaver connection closed")
         except Exception as e:
-            print(f"Error closing checkpointer: {e}")
-    if _store:
+            print(f"Error during checkpointer cleanup: {e}")
+    elif _checkpointer is not None:
+        print("AsyncPostgresSaver context manager not found, connection will close on process exit")
+    else:
+        print("AsyncPostgresSaver was not initialized, skipping cleanup")
+    
+    if _store_cm is not None:
         try:
             print("Closing AsyncPostgresStore connection...")
-            await _store.__aexit__(None, None, None)
+            await _store_cm.__aexit__(None, None, None)
+            print("AsyncPostgresStore connection closed")
         except Exception as e:
-            print(f"Error closing store: {e}")
+            print(f"Error during store cleanup: {e}")
+    elif _store is not None:
+        print("AsyncPostgresStore context manager not found, connection will close on process exit")
+    else:
+        print("AsyncPostgresStore was not initialized, skipping cleanup")
 
 
 app = FastAPI(
