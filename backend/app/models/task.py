@@ -76,7 +76,8 @@ class Task(Base):
     ticktick_priority = Column(Integer, nullable=True)  # 0=None, 1=Low, 3=Medium, 5=High
     start_date = Column(DateTime(timezone=True), nullable=True)
     all_day = Column(Boolean, default=False, nullable=False)
-    reminder_time = Column(DateTime(timezone=True), nullable=True)
+    reminder_time = Column(DateTime(timezone=True), nullable=True)  # Deprecated - use reminders array instead
+    reminders = Column(JSONB, nullable=False, default=[], server_default='[]')  # Array of minutes-before integers
     repeat_flag = Column(String(255), nullable=True)
 
     # Organization
@@ -112,3 +113,8 @@ class Task(Base):
     def effective_quadrant(self) -> EisenhowerQuadrant:
         """Get the effective quadrant (manual override takes precedence)."""
         return self.manual_quadrant_override or self.eisenhower_quadrant
+
+    @property
+    def reminder_minutes(self) -> list[int]:
+        """Get reminders as list of minutes-before integers."""
+        return self.reminders if self.reminders else []

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { PrioritySelect } from "@/components/PrioritySelect"
 import { DatePicker } from "@/components/DatePicker"
+import { UnifiedDatePicker } from "@/components/UnifiedDatePicker"
 import { MetadataRow } from "@/components/MetadataRow"
 import { Plus, Sparkles, AlertCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react"
 import { mutate } from "swr"
@@ -42,7 +43,7 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
   const [projectId, setProjectId] = useState<number | null>(null)
   const [projectName, setProjectName] = useState<string | null>(null)
   const [tags, setTags] = useState<string[]>([])
-  const [reminderTime, setReminderTime] = useState<string | null>(null)
+  const [reminders, setReminders] = useState<number[]>([])
   const [repeatFlag, setRepeatFlag] = useState<string | null>(null)
   const [timeEstimate, setTimeEstimate] = useState<number | null>(null)
   const [allDay, setAllDay] = useState(false)
@@ -123,7 +124,7 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
         project_id: projectId,
         project_name: projectName,
         ticktick_tags: tags,
-        reminder_time: reminderTime,
+        reminders: reminders,
         repeat_flag: repeatFlag,
         time_estimate: timeEstimate,
         all_day: allDay,
@@ -159,7 +160,7 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
       setProjectId(null)
       setProjectName(null)
       setTags([])
-      setReminderTime(null)
+      setReminders([])
       setRepeatFlag(null)
       setTimeEstimate(null)
       setAllDay(false)
@@ -185,7 +186,7 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
     setProjectId(null)
     setProjectName(null)
     setTags([])
-    setReminderTime(null)
+    setReminders([])
     setRepeatFlag(null)
     setTimeEstimate(null)
     setAllDay(false)
@@ -312,18 +313,14 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
           {/* Metadata Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <MetadataRow icon="📅" label="Due Date">
-              <DatePicker
+              <UnifiedDatePicker
                 value={dueDate}
                 onChange={(date) => setDueDate(date)}
+                allDay={allDay}
+                onAllDayChange={setAllDay}
+                reminders={reminders}
+                onRemindersChange={setReminders}
                 placeholder="No due date"
-              />
-            </MetadataRow>
-
-            <MetadataRow icon="🏁" label="Start Date">
-              <DatePicker
-                value={startDate}
-                onChange={(date) => setStartDate(date)}
-                placeholder="No start date"
               />
             </MetadataRow>
 
@@ -364,30 +361,20 @@ export function QuickAddTaskModal({ open, onOpenChange, onTaskAdded }: QuickAddT
 
             {showMore && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <MetadataRow icon="🏁" label="Start Date">
+                  <DatePicker
+                    value={startDate}
+                    onChange={(date) => setStartDate(date)}
+                    placeholder="No start date"
+                  />
+                </MetadataRow>
+
                 <MetadataRow icon="🔁" label="Repeat">
                   <RepeatPatternSelect value={repeatFlag} onChange={setRepeatFlag} />
                 </MetadataRow>
 
-                <MetadataRow icon="🔔" label="Reminder">
-                  <DatePicker
-                    value={reminderTime}
-                    onChange={setReminderTime}
-                    placeholder="No reminder"
-                  />
-                </MetadataRow>
-
                 <MetadataRow icon="⏱️" label="Time Estimate">
                   <TimeEstimateInput value={timeEstimate} onChange={setTimeEstimate} />
-                </MetadataRow>
-
-                <MetadataRow icon="☀️" label="All Day">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={allDay}
-                      onCheckedChange={(checked) => setAllDay(Boolean(checked))}
-                    />
-                    <span className="text-sm text-muted-foreground">Mark as all-day</span>
-                  </div>
                 </MetadataRow>
               </div>
             )}

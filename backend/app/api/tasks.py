@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, delete
 from sqlalchemy.orm import selectinload
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import logging
 
 # Initialize logger
@@ -39,10 +39,22 @@ class TaskCreate(BaseModel):
     project_name: Optional[str] = Field(None, description="Project display name")
     ticktick_project_id: Optional[str] = Field(None, description="TickTick project id")
     all_day: Optional[bool] = False
-    reminder_time: Optional[datetime] = None
+    reminder_time: Optional[datetime] = None  # Deprecated - use reminders array instead
+    reminders: Optional[List[int]] = Field(default_factory=list, description="Reminder minutes-before deadline")
     repeat_flag: Optional[str] = None
     time_estimate: Optional[int] = Field(None, description="Estimated minutes")
     user_id: int = Field(..., gt=0)  # For now, passed in request (will be from auth later)
+
+    @field_validator('reminders')
+    @classmethod
+    def validate_reminders(cls, v: Optional[List[int]]) -> List[int]:
+        """Validate reminders are non-negative integers."""
+        if v is None:
+            return []
+        for minutes in v:
+            if not isinstance(minutes, int) or minutes < 0:
+                raise ValueError("Reminders must be non-negative integers")
+        return v
 
     class Config:
         json_schema_extra = {
@@ -58,6 +70,7 @@ class TaskCreate(BaseModel):
                 "ticktick_project_id": "abc123",
                 "all_day": False,
                 "reminder_time": "2025-12-15T09:00:00Z",
+                "reminders": [0, 30, 1440],
                 "repeat_flag": "RRULE:FREQ=MONTHLY",
                 "time_estimate": 120,
                 "user_id": 1
@@ -77,11 +90,23 @@ class TaskUpdate(BaseModel):
     project_name: Optional[str] = None
     ticktick_project_id: Optional[str] = None
     all_day: Optional[bool] = None
-    reminder_time: Optional[datetime] = None
+    reminder_time: Optional[datetime] = None  # Deprecated - use reminders array instead
+    reminders: Optional[List[int]] = Field(None, description="Reminder minutes-before deadline")
     repeat_flag: Optional[str] = None
     time_estimate: Optional[int] = Field(None, description="Estimated minutes")
     status: Optional[TaskStatus] = None
     manual_quadrant_override: Optional[EisenhowerQuadrant] = None
+
+    @field_validator('reminders')
+    @classmethod
+    def validate_reminders(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        """Validate reminders are non-negative integers."""
+        if v is None:
+            return None
+        for minutes in v:
+            if not isinstance(minutes, int) or minutes < 0:
+                raise ValueError("Reminders must be non-negative integers")
+        return v
 
     class Config:
         json_schema_extra = {
@@ -141,7 +166,8 @@ class TaskResponse(BaseModel):
     ticktick_project_id: Optional[str]
     ticktick_task_id: Optional[str]
     all_day: bool
-    reminder_time: Optional[datetime]
+    reminder_time: Optional[datetime]  # Deprecated - use reminders array instead
+    reminders: List[int] = Field(default_factory=list)
     repeat_flag: Optional[str]
     time_estimate: Optional[int]
     focus_time: Optional[int]
@@ -291,7 +317,8 @@ async def create_task(
         project_name=task_data.project_name,
         ticktick_project_id=task_data.ticktick_project_id,
         all_day=task_data.all_day or False,
-        reminder_time=task_data.reminder_time,
+        reminder_time=task_data.reminder_time,  # Deprecated - kept for backward compat
+        reminders=task_data.reminders or [],
         repeat_flag=task_data.repeat_flag,
         time_estimate=task_data.time_estimate,
         status=TaskStatus.ACTIVE,

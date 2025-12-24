@@ -5,7 +5,8 @@ export interface Task {
   status: string
   due_date?: string | null
   start_date?: string | null
-  reminder_time?: string | null
+  reminder_time?: string | null  // Deprecated - use reminders array instead
+  reminders?: number[]
   repeat_flag?: string | null
   all_day?: boolean
   ticktick_priority?: number

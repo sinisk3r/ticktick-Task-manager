@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { formatMinutes } from '@/components/metadata/time'
+import { formatReminderMinutes } from '@/lib/dateUtils'
 
 interface Suggestion {
   id: number
@@ -67,6 +68,11 @@ export function SuggestionPanel({ suggestions, onApprove, onReject }: Suggestion
         return value || 'Not set'
       case 'reminder_time':
         return value ? new Date(value).toLocaleString() : 'Not set'
+      case 'reminders':
+        if (Array.isArray(value) && value.length > 0) {
+          return value.map(m => formatReminderMinutes(m)).join(', ')
+        }
+        return 'No reminders'
       default:
         return JSON.stringify(value)
     }

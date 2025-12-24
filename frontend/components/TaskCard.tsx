@@ -10,6 +10,7 @@ import { Task } from "@/types/task"
 import { RepeatBadge } from "@/components/metadata/RepeatBadge"
 import { TimeEstimateBadge } from "@/components/metadata/TimeEstimateBadge"
 import { formatMinutes } from "@/components/metadata/time"
+import { formatReminderMinutes, formatSmartDate } from "@/lib/dateUtils"
 import { DescriptionPreview } from "@/components/DescriptionPreview"
 import { motion } from "framer-motion"
 import { format, isToday, isTomorrow, isPast } from "date-fns"
@@ -258,9 +259,18 @@ export function TaskCard({ task, onUpdate, onDelete, onToggleStatus }: TaskCardP
                   🏁 Start {formatDate(task.start_date)}
                 </Badge>
               )}
-              {task.reminder_time && (
+              {/* Display reminders from new array */}
+              {task.reminders && task.reminders.length > 0 && (
                 <Badge variant="outline" className="text-xs">
-                  🔔 {formatDate(task.reminder_time)}
+                  🔔 {task.reminders.length === 1
+                    ? formatReminderMinutes(task.reminders[0], task.all_day)
+                    : `${task.reminders.length} reminders`}
+                </Badge>
+              )}
+              {/* Fallback for old data: show reminder_time if no reminders array */}
+              {!task.reminders?.length && task.reminder_time && (
+                <Badge variant="outline" className="text-xs">
+                  🔔 {formatSmartDate(task.reminder_time, true)}
                 </Badge>
               )}
               {task.repeat_flag && <RepeatBadge pattern={task.repeat_flag} />}

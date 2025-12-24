@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { PrioritySelect } from "@/components/PrioritySelect"
 import { DatePickerWithOptionalTime } from "@/components/DatePickerWithOptionalTime"
+import { UnifiedDatePicker } from "@/components/UnifiedDatePicker"
 import { api, API_BASE } from "@/lib/api"
 import { X, Trash2, AlertCircle, Sparkles, Calendar, Layout } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -314,7 +315,19 @@ export function TaskDetailPopover({
         updates.project_name = s.value.name
         updates.ticktick_project_id = s.value.ticktick
       }
-      else if (s.field === 'reminder_time') updates.reminder_time = s.value
+      else if (s.field === 'reminder_time') {
+        // Convert datetime to minutes-before for new reminders array
+        if (localTask.due_date && s.value) {
+          const dueDate = new Date(localTask.due_date)
+          const reminderDate = new Date(s.value)
+          const minutesBefore = Math.round((dueDate.getTime() - reminderDate.getTime()) / 60000)
+          if (minutesBefore >= 0) {
+            updates.reminders = [...(localTask.reminders || []), minutesBefore]
+              .filter((v, i, arr) => arr.indexOf(v) === i) // Remove duplicates
+              .sort((a, b) => a - b)
+          }
+        }
+      }
       else if (s.field === 'time_estimate') updates.time_estimate = s.value
       else if (s.field === 'tags') updates.ticktick_tags = s.value
     })
@@ -341,7 +354,17 @@ export function TaskDetailPopover({
         updates.project_name = projectData.name
         updates.ticktick_project_id = projectData.ticktick_project_id
       } else if (s.type === 'reminder_time') {
-        updates.reminder_time = s.suggested
+        // Convert datetime to minutes-before for new reminders array
+        if (localTask.due_date && s.suggested) {
+          const dueDate = new Date(localTask.due_date)
+          const reminderDate = new Date(s.suggested)
+          const minutesBefore = Math.round((dueDate.getTime() - reminderDate.getTime()) / 60000)
+          if (minutesBefore >= 0) {
+            updates.reminders = [...(localTask.reminders || []), minutesBefore]
+              .filter((v, i, arr) => arr.indexOf(v) === i) // Remove duplicates
+              .sort((a, b) => a - b)
+          }
+        }
       } else if (s.type === 'time_estimate') {
         updates.time_estimate = s.suggested
       } else if (s.type === 'tags') {
@@ -508,34 +531,17 @@ export function TaskDetailPopover({
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 <Calendar className="size-3" /> Schedule
               </h3>
-              <div className="grid gap-3 pl-1">
-                {/* Stack dates vertically to prevent overlap */}
-                <div className="space-y-3">
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Due By</label>
-                    <DatePickerWithOptionalTime
-                      value={localTask.due_date}
-                      onChange={(date) => handleFieldChange("due_date", date, true)}
-                      placeholder="Set due date..."
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Start Date</label>
-                    <DatePickerWithOptionalTime
-                      value={localTask.start_date}
-                      onChange={(date) => handleFieldChange("start_date", date, true)}
-                      placeholder="Set start date..."
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Reminder</label>
-                    <DatePickerWithOptionalTime
-                      value={localTask.reminder_time}
-                      onChange={(date) => handleFieldChange("reminder_time", date, true)}
-                      placeholder="Set reminder..."
-                    />
-                  </div>
-                </div>
+              <div className="grid gap-1.5 pl-1">
+                <label className="text-xs font-medium text-muted-foreground">Due By</label>
+                <UnifiedDatePicker
+                  value={localTask.due_date}
+                  onChange={(date) => handleFieldChange("due_date", date, true)}
+                  allDay={localTask.all_day || false}
+                  onAllDayChange={(allDay) => handleFieldChange("all_day", allDay, true)}
+                  reminders={localTask.reminders || []}
+                  onRemindersChange={(reminders) => handleFieldChange("reminders", reminders, true)}
+                  placeholder="Set due date..."
+                />
               </div>
             </div>
 
