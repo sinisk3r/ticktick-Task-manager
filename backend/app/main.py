@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,12 @@ from dotenv import load_dotenv
 
 from app.services import OllamaService
 from app.api import tasks, settings, auth, profile, projects, chat, agent, llm_configurations, strategy_config, notifications
+from app.core.persistent_memory import (
+    initialize_persistent_memory,
+    cleanup_persistent_memory,
+)
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -30,42 +37,30 @@ if os.path.exists(runtime_env_path):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler"""
+    """Application lifespan handler with persistent memory initialization"""
     # Startup
     backend_port = os.getenv('BACKEND_PORT', '8000')
     print(f"Starting Context API on port {backend_port}...")
     print(f"Ollama URL: {os.getenv('OLLAMA_URL', 'http://localhost:11434')}")
     print(f"Ollama Model: {os.getenv('OLLAMA_MODEL', 'qwen3:4b')}")
     print(f"Frontend URL: {os.getenv('FRONTEND_URL', 'http://localhost:3000')}")
+    
+    # Initialize Chat UX v2 persistent memory connections
+    # These are initialized at startup and kept alive for the application lifetime
+    checkpointer_ok, store_ok = await initialize_persistent_memory()
+    
+    if checkpointer_ok and store_ok:
+        print("✓ LangGraph persistent memory initialized successfully")
+    elif checkpointer_ok or store_ok:
+        print("⚠️  LangGraph persistent memory partially initialized")
+    else:
+        print("⚠️  LangGraph persistent memory initialization failed, continuing without it")
+    
     yield
+    
     # Shutdown
     print("Shutting down Context API...")
-
-    # Clean up Chat UX v2 persistent memory connections
-    from app.api.agent import _checkpointer, _store, _checkpointer_cm, _store_cm
-    if _checkpointer_cm is not None:
-        try:
-            print("Closing AsyncPostgresSaver connection...")
-            await _checkpointer_cm.__aexit__(None, None, None)
-            print("AsyncPostgresSaver connection closed")
-        except Exception as e:
-            print(f"Error during checkpointer cleanup: {e}")
-    elif _checkpointer is not None:
-        print("AsyncPostgresSaver context manager not found, connection will close on process exit")
-    else:
-        print("AsyncPostgresSaver was not initialized, skipping cleanup")
-    
-    if _store_cm is not None:
-        try:
-            print("Closing AsyncPostgresStore connection...")
-            await _store_cm.__aexit__(None, None, None)
-            print("AsyncPostgresStore connection closed")
-        except Exception as e:
-            print(f"Error during store cleanup: {e}")
-    elif _store is not None:
-        print("AsyncPostgresStore context manager not found, connection will close on process exit")
-    else:
-        print("AsyncPostgresStore was not initialized, skipping cleanup")
+    await cleanup_persistent_memory()
 
 
 app = FastAPI(

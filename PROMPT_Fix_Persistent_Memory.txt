@@ -1,0 +1,50 @@
+# Prompt: Fix and Re-enable Persistent Memory for Chat UX v2 Agent
+
+## Context
+
+I'm working on a FastAPI backend with a LangGraph-based agent system. The Chat UX v2 agent is currently working but persistent memory is temporarily disabled due to connection issues with AsyncPostgresSaver and AsyncPostgresStore.
+
+## Current Issue
+
+When `DISABLE_PERSISTENT_MEMORY_TEMPORARILY = False` in `backend/app/api/agent.py`, the agent hangs with:
+- Error: "the connection is closed" (psycopg.OperationalError)
+- Or: setup() times out due to stuck CREATE INDEX CONCURRENTLY operations
+
+## What's Already Done
+
+✅ Table existence checks to skip setup() when tables exist
+✅ Connection string formatting for LangGraph (sslmode=disable)
+✅ Timeout protection (30s) on setup() calls
+✅ Graceful degradation if initialization fails
+✅ Context manager storage to keep connections alive
+
+## What I Need
+
+1. **Fix the connection lifecycle issue** - The AsyncPostgresSaver/AsyncPostgresStore context managers aren't staying alive properly when used as singletons.
+
+2. **Resolve stuck index operations** - Multiple CREATE INDEX CONCURRENTLY operations are stuck in the database.
+
+3. **Re-enable persistent memory** - Set `DISABLE_PERSISTENT_MEMORY_TEMPORARILY = False` and ensure it works reliably.
+
+## Key Files
+
+- `backend/app/api/agent.py` - Main agent endpoint with get_checkpointer() and get_store() functions
+- `backend/app/main.py` - Application lifespan with cleanup
+- Database: PostgreSQL at `postgresql://context:context_dev@127.0.0.1:5433/context`
+
+## Requirements
+
+- Agent must respond without hanging
+- No "connection is closed" errors
+- Conversation history persists across requests (same thread_id)
+- User preferences remembered across sessions
+- No stuck database operations
+
+## Approach Options
+
+1. Fix stuck index operations first (cancel them in PostgreSQL)
+2. Fix connection lifecycle (use proper async context manager pattern or connection pooling)
+3. Alternative: Use Redis or file-based checkpoints if PostgreSQL continues to be problematic
+
+Please help me diagnose the root cause, fix the connection issues, and re-enable persistent memory so the agent can maintain conversation history across sessions.
+
