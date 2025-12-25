@@ -3,7 +3,7 @@ Task model with LLM analysis results and Eisenhower matrix classification.
 """
 from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, ForeignKey, Enum as SQLEnum, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 from enum import Enum
 from app.core.database import Base
@@ -82,7 +82,8 @@ class Task(Base):
 
     # Organization
     project_name = Column(String(500), nullable=True)
-    parent_task_id = Column(String(255), nullable=True)
+    parent_task_id = Column(String(255), nullable=True)  # TickTick parent ID (String for compatibility)
+    parent_task_id_int = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)  # Internal parent ID (Integer)
     sort_order = Column(BigInteger, default=0, nullable=False)
     column_id = Column(String(255), nullable=True)
 
@@ -105,6 +106,12 @@ class Task(Base):
     user = relationship("User", back_populates="tasks")
     project = relationship("Project", back_populates="tasks")
     suggestions = relationship("TaskSuggestion", back_populates="task", cascade="all, delete-orphan")
+    parent = relationship(
+        "Task",
+        remote_side=[id],
+        foreign_keys=[parent_task_id_int],
+        backref=backref("subtasks", lazy="raise")  # Raise error on lazy load to prevent async hangs
+    )
 
     def __repr__(self):
         return f"<Task(id={self.id}, title='{self.title[:30]}...', quadrant={self.eisenhower_quadrant})>"

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, delete
 from sqlalchemy.orm import selectinload
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import logging
 
 # Initialize logger
@@ -182,9 +182,31 @@ class TaskResponse(BaseModel):
     manual_override_source: Optional[str]
     manual_override_at: Optional[datetime]
     manual_order: Optional[int]
+    parent_task_id: Optional[str]  # TickTick parent ID
+    parent_task_id_int: Optional[int]  # Internal parent ID
+    subtasks: Optional[List["TaskResponse"]] = None  # Populated manually, NOT from ORM
     created_at: datetime
     updated_at: datetime
     analyzed_at: Optional[datetime]
+
+    @model_validator(mode='before')
+    @classmethod
+    def prevent_lazy_load_subtasks(cls, data):
+        """
+        Prevent Pydantic from triggering lazy loading on the SQLAlchemy 'subtasks' relationship.
+        In async context, lazy loading hangs indefinitely. We populate subtasks manually.
+        """
+        if hasattr(data, '__table__'):  # SQLAlchemy ORM object
+            # Convert to dict, excluding 'subtasks' to prevent lazy load
+            result = {}
+            for column in data.__table__.columns:
+                result[column.name] = getattr(data, column.name, None)
+            # Add computed properties
+            result['effective_quadrant'] = getattr(data, 'effective_quadrant', None)
+            # Explicitly set subtasks to None (will be populated manually)
+            result['subtasks'] = None
+            return result
+        return data
 
     class Config:
         from_attributes = True
@@ -363,6 +385,7 @@ async def list_tasks(
     tag: Optional[str] = Query(None, description="Filter by TickTick tag"),
     due_before: Optional[datetime] = Query(None, description="Filter tasks with due_date before this ISO timestamp"),
     due_after: Optional[datetime] = Query(None, description="Filter tasks with due_date after this ISO timestamp"),
+    include_subtasks: bool = Query(False, description="Include subtasks for each task in response"),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of tasks to return"),
     offset: int = Query(0, ge=0, description="Number of tasks to skip"),
     db: AsyncSession = Depends(get_db)
@@ -457,7 +480,64 @@ async def list_tasks(
     result = await db.execute(query)
     tasks = result.scalars().all()
 
-    return TaskListResponse(tasks=tasks, total=total)
+    # Load subtasks if requested (only for tasks in current page for performance)
+    subtasks_map = {}
+    if include_subtasks and tasks:
+        task_ids = [task.id for task in tasks]
+        ticktick_task_ids = [task.ticktick_task_id for task in tasks if task.ticktick_task_id]
+        
+        # Fetch all subtasks for tasks in this page
+        if task_ids or ticktick_task_ids:
+            # Build parent conditions (OR between int and string parent IDs)
+            parent_conditions = []
+            if task_ids:
+                parent_conditions.append(Task.parent_task_id_int.in_(task_ids))
+            if ticktick_task_ids:
+                parent_conditions.append(Task.parent_task_id.in_(ticktick_task_ids))
+
+            # Query: user_id matches AND (parent_task_id_int OR parent_task_id matches)
+            subtasks_query = select(Task).where(
+                and_(
+                    Task.user_id == user_id,
+                    or_(*parent_conditions)
+                )
+            )
+            subtasks_result = await db.execute(subtasks_query)
+            all_subtasks = subtasks_result.scalars().all()
+            
+            # Group subtasks by parent (using both ID types as keys)
+            for subtask in all_subtasks:
+                if subtask.parent_task_id_int:
+                    if subtask.parent_task_id_int not in subtasks_map:
+                        subtasks_map[subtask.parent_task_id_int] = []
+                    subtasks_map[subtask.parent_task_id_int].append(subtask)
+                if subtask.parent_task_id:
+                    if subtask.parent_task_id not in subtasks_map:
+                        subtasks_map[subtask.parent_task_id] = []
+                    subtasks_map[subtask.parent_task_id].append(subtask)
+    
+    # Build response - use from_attributes but set subtasks manually to avoid lazy load
+    task_responses = []
+    for task in tasks:
+        # Get subtasks for this task
+        task_subtasks = []
+        if include_subtasks:
+            if task.id in subtasks_map:
+                task_subtasks.extend(subtasks_map[task.id])
+            if task.ticktick_task_id and task.ticktick_task_id in subtasks_map:
+                task_subtasks.extend(subtasks_map[task.ticktick_task_id])
+        
+        # Create TaskResponse using from_attributes, then override subtasks
+        task_response = TaskResponse.model_validate(task)
+        if include_subtasks:
+            # Convert subtasks to TaskResponse objects
+            task_response.subtasks = [TaskResponse.model_validate(st) for st in task_subtasks]
+        else:
+            task_response.subtasks = None
+        
+        task_responses.append(task_response)
+
+    return TaskListResponse(tasks=task_responses, total=total)
 
 
 @router.get("/summary", response_model=TaskSummaryResponse)
@@ -870,6 +950,7 @@ async def batch_sort_tasks(
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: int,
+    include_subtasks: bool = Query(False, description="Include subtasks in response"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -885,7 +966,32 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    return task
+    # Load subtasks if requested (check both Integer and String parent fields)
+    task_subtasks = []
+    if include_subtasks:
+        # Build parent conditions - only include ticktick condition if task has ticktick_task_id
+        parent_conditions = [Task.parent_task_id_int == task_id]  # Internal relationships
+        if task.ticktick_task_id:
+            parent_conditions.append(Task.parent_task_id == task.ticktick_task_id)  # TickTick relationships
+
+        subtasks_result = await db.execute(
+            select(Task).where(
+                and_(
+                    Task.user_id == task.user_id,
+                    or_(*parent_conditions)
+                )
+            )
+        )
+        task_subtasks = subtasks_result.scalars().all()
+    
+    # Create response using from_attributes, then set subtasks manually to avoid lazy load
+    task_response = TaskResponse.model_validate(task)
+    if include_subtasks:
+        task_response.subtasks = [TaskResponse.model_validate(st) for st in task_subtasks]
+    else:
+        task_response.subtasks = None
+
+    return task_response
 
 
 @router.put("/{task_id}", response_model=TaskResponse)

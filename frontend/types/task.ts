@@ -24,6 +24,9 @@ export interface Task {
   manual_override_reason?: string
   manual_override_at?: string
   manual_order?: number
+  parent_task_id?: string | null  // TickTick parent ID
+  parent_task_id_int?: number | null  // Internal parent task ID
+  subtasks?: Task[]  // Optional - populated when fetching with include_subtasks
   analysis_reasoning?: string
   created_at?: string
   updated_at?: string

@@ -77,6 +77,10 @@ export function TaskDetailPopover({
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [enhancedSuggestions, setEnhancedSuggestions] = useState<EnhancedSuggestion[]>([])
   const [rationale, setRationale] = useState<string | null>(null)
+  
+  // Subtasks state
+  const [subtasks, setSubtasks] = useState<Task[]>([])
+  const [loadingSubtasks, setLoadingSubtasks] = useState(false)
 
   // Fetch projects for matching
   const { data: projects } = useSWR<any[]>(`${API_BASE}/api/projects?user_id=1`, fetcher)
@@ -88,6 +92,41 @@ export function TaskDetailPopover({
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Fetch subtasks when popover opens
+  useEffect(() => {
+    if (open && task.id) {
+      fetchSubtasks()
+    }
+  }, [open, task.id])
+
+  const fetchSubtasks = async () => {
+    try {
+      setLoadingSubtasks(true)
+      const taskWithSubtasks = await api.get<Task>(`/api/tasks/${task.id}?include_subtasks=true`)
+      setSubtasks(taskWithSubtasks.subtasks || [])
+    } catch (err: any) {
+      console.error("Failed to fetch subtasks:", err)
+      setSubtasks([])
+    } finally {
+      setLoadingSubtasks(false)
+    }
+  }
+
+  const handleSubtaskToggle = async (subtask: Task) => {
+    const newStatus = subtask.status === "completed" ? "active" : "completed"
+    try {
+      await api.patch<Task>(`/api/tasks/${subtask.id}`, { status: newStatus, user_id: 1 })
+      setSubtasks(prev => prev.map(st => st.id === subtask.id ? { ...st, status: newStatus } : st))
+      // Refresh parent task
+      const updatedTask = await api.get<Task>(`/api/tasks/${task.id}`)
+      setLocalTask(updatedTask)
+      onUpdate?.(updatedTask)
+    } catch (err: any) {
+      console.error("Failed to update subtask:", err)
+      toast.error("Failed to update subtask")
+    }
+  }
 
   // Handle Escape key and body scroll lock
   useEffect(() => {
@@ -378,8 +417,19 @@ export function TaskDetailPopover({
 
     if (Object.keys(updates).length > 0) {
       await saveTask(updates)
-      setEnhancedSuggestions([])
-      setRationale(null)
+      
+      // Remove only the applied suggestions from the list, keep panel open
+      setEnhancedSuggestions(prev => {
+        // Filter out suggestions that match the applied ones
+        // Match by type and suggested value to identify which to remove
+        return prev.filter(existing => {
+          return !selected.some(applied => 
+            applied.type === existing.type && 
+            JSON.stringify(applied.suggested) === JSON.stringify(existing.suggested)
+          )
+        })
+      })
+      
       toast.success(`Applied ${selected.length} suggestion${selected.length !== 1 ? 's' : ''}`)
     }
   }
@@ -570,6 +620,50 @@ export function TaskDetailPopover({
                   onChange={(val) => handleFieldChange("description", val)}
                 />
               </div>
+            </div>
+
+            {/* Subtasks Section */}
+            <div className="border-t p-4 space-y-2 shrink-0 bg-background">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Subtasks {subtasks.length > 0 && `(${subtasks.length})`}
+                </span>
+              </div>
+              {loadingSubtasks ? (
+                <div className="text-xs text-muted-foreground">Loading subtasks...</div>
+              ) : subtasks.length === 0 ? (
+                <div className="text-xs text-muted-foreground italic">No subtasks</div>
+              ) : (
+                <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                  {subtasks.map((subtask) => (
+                    <div
+                      key={subtask.id}
+                      className="flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors"
+                    >
+                      <Checkbox
+                        checked={subtask.status === "completed"}
+                        onCheckedChange={() => handleSubtaskToggle(subtask)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className={cn(
+                            "text-sm",
+                            subtask.status === "completed" && "line-through text-muted-foreground"
+                          )}
+                        >
+                          {subtask.title}
+                        </div>
+                        {subtask.time_estimate && (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {subtask.time_estimate} min
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* AI Suggestions Section */}

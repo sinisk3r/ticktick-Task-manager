@@ -101,7 +101,7 @@ export function TaskList() {
     return params.toString()
   }
 
-  const tasksUrl = `${API_BASE}/api/tasks?${buildQuery()}`
+  const tasksUrl = `${API_BASE}/api/tasks?${buildQuery()}&include_subtasks=true`
 
   const { data, error, isLoading, mutate } = useSWR<TasksResponse>(
     tasksUrl,
@@ -116,6 +116,15 @@ export function TaskList() {
   )
 
   const tasks = data?.tasks || []
+  
+  // Filter to only parent tasks and get subtasks
+  const parentTasks = tasks.filter(task => !task.parent_task_id_int && !task.parent_task_id)
+  const getSubtasks = (parentTask: Task): Task[] => {
+    return tasks.filter(task => 
+      task.parent_task_id_int === parentTask.id || 
+      (parentTask.ticktick_task_id && task.parent_task_id === parentTask.ticktick_task_id)
+    )
+  }
 
   const handleTaskUpdate = (updatedTask: Task) => {
     mutate((current) => {
@@ -188,7 +197,7 @@ export function TaskList() {
   }, [summary, tasks])
 
   const sortedTasks = useMemo(() => {
-    const next = [...tasks]
+    const next = [...parentTasks]
     return next.sort((a, b) => {
       switch (sortBy) {
         case "due_date": {
@@ -208,7 +217,7 @@ export function TaskList() {
         }
       }
     })
-  }, [tasks, sortBy])
+  }, [parentTasks, sortBy])
 
   if (isLoading) {
     return (
@@ -385,29 +394,69 @@ export function TaskList() {
             </div>
           ) : listLayout === "vertical" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sortedTasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  onUpdate={handleTaskUpdate}
-                  onDelete={handleTaskDelete}
-                  onToggleStatus={handleToggleStatus}
-                />
-              ))}
+              {sortedTasks.map((task) => {
+                const taskSubtasks = getSubtasks(task)
+                return (
+                  <div key={task.id}>
+                    <TaskCard
+                      task={task}
+                      onUpdate={handleTaskUpdate}
+                      onDelete={handleTaskDelete}
+                      onToggleStatus={handleToggleStatus}
+                    />
+                    {/* Render subtasks indented */}
+                    {taskSubtasks.length > 0 && (
+                      <div className="ml-4 mt-2 space-y-2">
+                        {taskSubtasks.map((subtask) => (
+                          <TaskCard
+                            key={subtask.id}
+                            task={subtask}
+                            onUpdate={handleTaskUpdate}
+                            onDelete={handleTaskDelete}
+                            onToggleStatus={handleToggleStatus}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           ) : (
             <div className="space-y-3">
-              {sortedTasks.map((task) => (
-                <TaskDetailPopover
-                  key={task.id}
-                  task={task}
-                  onUpdate={handleTaskUpdate}
-                  onDelete={handleTaskDelete}
-                  trigger={
-                    <ListTaskCard task={task} onToggleStatus={handleToggleStatus} />
-                  }
-                />
-              ))}
+              {sortedTasks.map((task) => {
+                const taskSubtasks = getSubtasks(task)
+                return (
+                  <div key={task.id}>
+                    <TaskDetailPopover
+                      task={task}
+                      onUpdate={handleTaskUpdate}
+                      onDelete={handleTaskDelete}
+                      trigger={
+                        <ListTaskCard task={task} onToggleStatus={handleToggleStatus} />
+                      }
+                    />
+                    {/* Render subtasks indented */}
+                    {taskSubtasks.length > 0 && (
+                      <div className="ml-6 mt-1 space-y-1 border-l-2 border-muted pl-3">
+                        {taskSubtasks.map((subtask) => (
+                          <TaskDetailPopover
+                            key={subtask.id}
+                            task={subtask}
+                            onUpdate={handleTaskUpdate}
+                            onDelete={handleTaskDelete}
+                            trigger={
+                              <div className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">
+                                └ {subtask.title}
+                              </div>
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </TabsContent>

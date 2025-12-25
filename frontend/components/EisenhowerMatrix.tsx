@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AlertCircle } from "lucide-react"
 import { SortableCard } from "@/components/dnd/SortableCard"
 import { getQuadrant } from "@/lib/taskUtils"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { UnsortedItemsSection } from "@/components/UnsortedItemsSection"
 import { TaskDetailPopover } from "@/components/TaskDetailPopover"
@@ -48,27 +49,49 @@ function SortableTask({
   task,
   isActiveOverlay,
   onUpdate,
-  onDelete
+  onDelete,
+  subtasks,
+  getSubtasks
 }: {
   task: Task
   isActiveOverlay?: boolean
   onUpdate?: (task: Task) => void
   onDelete?: (taskId: number) => void
+  subtasks?: Task[]
+  getSubtasks?: (parent: Task) => Task[]
 }) {
   // If this is the overlay, render without sortable wrappers
   if (isActiveOverlay) {
     return <TaskCardInner task={task} isOverlay />
   }
 
+  const taskSubtasks = subtasks || (getSubtasks ? getSubtasks(task) : [])
+
   return (
-    <SortableCard
-      id={task.id}
-      data={{ type: "Task", task }}
-      className="mb-2 touch-none"
-      draggingClassName="opacity-30"
-    >
-      {() => <TaskCardInner task={task} onUpdate={onUpdate} onDelete={onDelete} />}
-    </SortableCard>
+    <div className="mb-2">
+      <SortableCard
+        id={task.id}
+        data={{ type: "Task", task }}
+        className="touch-none"
+        draggingClassName="opacity-30"
+      >
+        {() => <TaskCardInner task={task} onUpdate={onUpdate} onDelete={onDelete} />}
+      </SortableCard>
+      {/* Render subtasks indented */}
+      {taskSubtasks.length > 0 && (
+        <div className="ml-4 mt-1 space-y-1 border-l-2 border-muted pl-3">
+          {taskSubtasks.map((subtask) => (
+            <TaskCardInner
+              key={subtask.id}
+              task={subtask}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isSubtask
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -76,12 +99,14 @@ function TaskCardInner({
   task,
   isOverlay,
   onUpdate,
-  onDelete
+  onDelete,
+  isSubtask
 }: {
   task: Task
   isOverlay?: boolean
   onUpdate?: (task: Task) => void
   onDelete?: (taskId: number) => void
+  isSubtask?: boolean
 }) {
   // If this is the drag overlay, render simple display only
   if (isOverlay) {
@@ -103,26 +128,34 @@ function TaskCardInner({
         onDelete?.(taskId)
       }}
       trigger={
-        <div className="w-full text-left p-3 rounded-lg bg-card border hover:bg-accent/50 transition-colors cursor-pointer">
-          <div className="text-sm font-medium mb-1">{task.title}</div>
-          {task.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2">
+        <div className={cn(
+          "w-full text-left p-2 rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer",
+          isSubtask && "bg-muted/30 border-muted text-sm"
+        )}>
+          <div className={cn("font-medium", isSubtask ? "text-xs" : "text-sm")}>
+            {isSubtask && "└ "}
+            {task.title}
+          </div>
+          {task.description && !isSubtask && (
+            <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
               {task.description}
             </p>
           )}
-          {/* Quadrant badge */}
-          <div className="mt-2 flex gap-1">
-            {getQuadrant(task) && (
-              <Badge variant="outline" className="text-xs">
-                {getQuadrant(task)}
-              </Badge>
-            )}
-            {task.manual_quadrant_override && (
-              <Badge variant="secondary" className="text-xs">
-                Manual
-              </Badge>
-            )}
-          </div>
+          {/* Quadrant badge - only show for parent tasks */}
+          {!isSubtask && (
+            <div className="mt-2 flex gap-1">
+              {getQuadrant(task) && (
+                <Badge variant="outline" className="text-xs">
+                  {getQuadrant(task)}
+                </Badge>
+              )}
+              {task.manual_quadrant_override && (
+                <Badge variant="secondary" className="text-xs">
+                  Manual
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
       }
     />
@@ -140,6 +173,7 @@ const QuadrantCard = ({
   onResetTask,
   onUpdateTask,
   onDeleteTask,
+  getSubtasks,
 }: {
   title: string
   description: string
@@ -151,6 +185,7 @@ const QuadrantCard = ({
   onResetTask?: (taskId: number) => void
   onUpdateTask?: (task: Task) => void
   onDeleteTask?: (taskId: number) => void
+  getSubtasks?: (parent: Task) => Task[]
 }) => {
   return (
     <Card
@@ -184,6 +219,7 @@ const QuadrantCard = ({
                 task={task}
                 onUpdate={onUpdateTask}
                 onDelete={onDeleteTask}
+                getSubtasks={getSubtasks}
               />
             ))
           )}
@@ -219,10 +255,13 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
     })
   )
 
-  // Helper to split tasks into buckets
+  // Helper to split tasks into buckets (only parent tasks, subtasks are shown with parents)
   const getBuckets = (taskList: Task[]) => {
     const buckets: Record<string, Task[]> = { Q1: [], Q2: [], Q3: [], Q4: [] }
-    taskList.forEach(task => {
+    // Only include tasks that are not subtasks (no parent_task_id_int or parent_task_id)
+    const parentTasks = taskList.filter(task => !task.parent_task_id_int && !task.parent_task_id)
+    
+    parentTasks.forEach(task => {
       const q = getQuadrant(task)
       if (q && buckets[q]) buckets[q].push(task)
     })
@@ -239,6 +278,14 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
       })
     })
     return buckets
+  }
+
+  // Helper to get subtasks for a parent task
+  const getSubtasks = (parentTask: Task): Task[] => {
+    return tasksState.filter(task => 
+      task.parent_task_id_int === parentTask.id || 
+      (parentTask.ticktick_task_id && task.parent_task_id === parentTask.ticktick_task_id)
+    )
   }
 
   // State to track order in each quadrant
@@ -603,6 +650,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             onResetTask={handleReset}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
+            getSubtasks={getSubtasks}
           />
 
           <QuadrantCard
@@ -616,6 +664,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             onResetTask={handleReset}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
+            getSubtasks={getSubtasks}
           />
 
           <QuadrantCard
@@ -629,6 +678,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             onResetTask={handleReset}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
+            getSubtasks={getSubtasks}
           />
 
           <QuadrantCard
@@ -642,6 +692,7 @@ export function EisenhowerMatrix({ tasks, onTasksUpdate, refresh }: EisenhowerMa
             onResetTask={handleReset}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
+            getSubtasks={getSubtasks}
           />
         </div>
 

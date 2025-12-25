@@ -827,6 +827,7 @@ Return JSON only:
                     time_estimate=subtask.get("estimated_minutes"),
                     status=TaskStatus.ACTIVE,
                     is_sorted=False,
+                    parent_task_id_int=task_id if task_id else None,  # Link to parent (internal)
                 )
                 db.add(new_task)
                 await db.flush()
